@@ -1,4 +1,4 @@
-/* 全局霓虹风格 QSS — Rhythm Wave 主题 */
+/* 全局霓虹风格 QSS — SpectrumFall 主题 */
 
 /* 全局背景 */
 QWidget {
@@ -197,6 +197,22 @@ QWidget#statsPanel {
     padding: 15px;
 }
 
+/* 进度条 */
+QProgressBar {
+    background-color: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    text-align: center;
+    color: #0f3460;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+QProgressBar::chunk {
+    background-color: #00cc77;
+    border-radius: 5px;
+}
+
 /* 标签 */
 QLabel {
     background: transparent;
@@ -230,4 +246,35 @@ QListWidget {
 QListWidget::item:selected {
     background-color: #0f3460;
     color: #00ff88;
+}
+
+/* 历史记录列表 */
+QListWidget#historyList {
+    background-color: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: 4px;
+    outline: none;
+    font-size: 13px;
+}
+
+QListWidget#historyList::item {
+    padding: 8px 12px;
+    border-radius: 4px;
+    border-bottom: 1px solid #0f3460;
+}
+
+QListWidget#historyList::item:selected {
+    background-color: #0f3460;
+    color: #00ff88;
+    border-color: #00ff88;
+}
+
+QListWidget#historyList::item:hover {
+    background-color: #1a2a4a;
+}
+
+QListWidget#historyList::item:disabled {
+    color: #666666;
 }

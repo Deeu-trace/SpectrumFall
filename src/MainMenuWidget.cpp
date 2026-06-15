@@ -20,7 +20,7 @@ MainMenuWidget::MainMenuWidget(QWidget* parent)
     layout->addStretch(3);
 
     // 标题（用 QLabel）
-    QLabel* titleLabel = new QLabel(QStringLiteral("Rhythm Wave"), this);
+    QLabel* titleLabel = new QLabel(QStringLiteral("SpectrumFall"), this);
     QFont titleFont = titleLabel->font();
     titleFont.setPixelSize(64);
     titleFont.setBold(true);

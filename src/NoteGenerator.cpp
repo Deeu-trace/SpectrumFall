@@ -4,17 +4,21 @@ QVector<GameNote> NoteGenerator::generate(const QVector<BeatPoint>& beatPoints, 
 {
     QVector<GameNote> notes;
 
-    qint64 lastTimestamp = -minGapMs; // 确保第一个节拍不被过滤
+    // 每个轨道独立追踪最近时间戳，允许同一时刻不同轨道的双押共存
+    qint64 lastTimestampPerLane[4] = {-minGapMs, -minGapMs, -minGapMs, -minGapMs};
 
     for (const BeatPoint& bp : beatPoints) {
-        // 过滤间隔太近的节拍
-        if (bp.timestampMs - lastTimestamp < minGapMs) {
+        int lane = bp.lane;
+        if (lane < 0 || lane > 3) lane = 0; // 安全兜底
+
+        // 同一轨道内间隔太近才过滤
+        if (bp.timestampMs - lastTimestampPerLane[lane] < minGapMs) {
             continue;
         }
 
-        GameNote note(bp.timestampMs, bp.lane);
+        GameNote note(bp.timestampMs, lane);
         notes.append(note);
-        lastTimestamp = bp.timestampMs;
+        lastTimestampPerLane[lane] = bp.timestampMs;
     }
 
     return notes;

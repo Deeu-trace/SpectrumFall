@@ -62,6 +62,10 @@ signals:
     void playbackStateChanged(QMediaPlayer::PlaybackState state);
     void loadComplete(bool success);
 
+private slots:
+    /// 在主线程中设置 QMediaPlayer 播放源（供跨线程 invokeMethod 调用）
+    void applyPendingSource();
+
 private:
     QMediaPlayer* m_player;        ///< 音频播放器
     QAudioOutput* m_audioOutput;   ///< 音频输出
@@ -71,6 +75,7 @@ private:
     int m_bitsPerSample;           ///< 位深度
     qint64 m_durationMs;           ///< 总时长（毫秒）
     bool m_loaded;                 ///< 是否已加载
+    QUrl m_pendingSource;         ///< 待在主线程设置的播放源（跨线程安全）
 
     /// 手写 WAV RIFF 解析器（支持 PCM 和 IEEE Float）
     bool parseWav(const QString& path);

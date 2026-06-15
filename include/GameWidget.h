@@ -9,6 +9,7 @@
 
 class AudioEngine;
 class ScoreManager;
+class QPushButton;
 
 /// 游戏页面：4 轨道下落式音符，判定线，键盘输入 D/F/J/K，判定文字动画
 class GameWidget : public QWidget
@@ -35,11 +36,14 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void onRenderTick();
 
 private:
+    void setupPauseOverlay();          ///< 创建暂停菜单遮罩
+
     AudioEngine* m_audioEngine;        ///< 音频引擎
     ScoreManager* m_scoreManager;      ///< 分数管理器
     QTimer* m_renderTimer;             ///< 渲染定时器
@@ -64,6 +68,11 @@ private:
     qreal m_judgeLineY;                ///< 判定线 Y 坐标
     qreal m_noteSpeed;                 ///< 音符下落速度（像素/毫秒）
     qreal m_trackWidth;                ///< 轨道宽度
+
+    // 暂停菜单
+    QWidget* m_pauseOverlay;           ///< 暂停遮罩
+    QPushButton* m_continueBtn;        ///< 继续游戏按钮
+    QPushButton* m_backToMenuBtn;      ///< 返回主菜单按钮
 
     /// 获取精确的当前游戏时间（毫秒），基于高精度时钟
     qint64 getGameTime() const;

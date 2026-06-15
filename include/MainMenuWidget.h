@@ -4,7 +4,7 @@
 
 class QPushButton;
 
-/// 主菜单页面：标题 "Rhythm Wave"，选择歌曲/退出按钮，背景动画
+/// 主菜单页面：标题 "SpectrumFall"，选择歌曲/退出按钮，背景动画
 class MainMenuWidget : public QWidget
 {
     Q_OBJECT

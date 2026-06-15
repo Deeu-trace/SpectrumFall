@@ -5,6 +5,8 @@
 #include <QPainter>
 #include <QPaintEvent>
 #include <QKeyEvent>
+#include <QPushButton>
+#include <QVBoxLayout>
 #include <QApplication>
 #include <cmath>
 
@@ -45,6 +47,46 @@ GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWi
         connect(m_scoreManager, &ScoreManager::scoreChanged, this, [this](int) { update(); });
         connect(m_scoreManager, &ScoreManager::comboChanged, this, [this](int) { update(); });
     }
+
+    setupPauseOverlay();
+}
+
+void GameWidget::setupPauseOverlay()
+{
+    // 全屏半透明遮罩
+    m_pauseOverlay = new QWidget(this);
+    m_pauseOverlay->setGeometry(0, 0, width(), height());
+    m_pauseOverlay->setStyleSheet("background-color: rgba(10, 10, 30, 200);");
+    m_pauseOverlay->hide();
+
+    // 居中按钮容器
+    QVBoxLayout* layout = new QVBoxLayout(m_pauseOverlay);
+    layout->setAlignment(Qt::AlignCenter);
+    layout->setSpacing(20);
+
+    // "继续游戏" 按钮
+    m_continueBtn = new QPushButton(QStringLiteral("继续游戏"), m_pauseOverlay);
+    m_continueBtn->setMinimumSize(200, 50);
+    m_continueBtn->setObjectName("menuButton");
+    layout->addWidget(m_continueBtn);
+
+    // "返回主菜单" 按钮
+    m_backToMenuBtn = new QPushButton(QStringLiteral("返回主菜单"), m_pauseOverlay);
+    m_backToMenuBtn->setMinimumSize(200, 50);
+    m_backToMenuBtn->setObjectName("actionButton");
+    layout->addWidget(m_backToMenuBtn);
+
+    connect(m_continueBtn, &QPushButton::clicked, this, [this]() {
+        resumeGame();
+        m_pauseOverlay->hide();
+    });
+    connect(m_backToMenuBtn, &QPushButton::clicked, this, [this]() {
+        m_gameActive = false;
+        m_renderTimer->stop();
+        m_pauseOverlay->hide();
+        m_audioEngine->pause();
+        emit backRequested();
+    });
 }
 
 void GameWidget::startGame(const QVector<GameNote>& notes)
@@ -93,6 +135,14 @@ void GameWidget::resumeGame()
     setFocus();
     if (m_audioEngine) {
         m_audioEngine->play();
+    }
+}
+
+void GameWidget::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    if (m_pauseOverlay) {
+        m_pauseOverlay->setGeometry(0, 0, width(), height());
     }
 }
 
@@ -253,18 +303,6 @@ void GameWidget::paintEvent(QPaintEvent* event)
                          QStringLiteral("%1 Combo").arg(combo));
     }
 
-    // 暂停提示
-    if (m_paused) {
-        painter.fillRect(rect(), QColor(0, 0, 0, 150));
-
-        QFont pauseFont;
-        pauseFont.setPixelSize(40);
-        pauseFont.setBold(true);
-        painter.setFont(pauseFont);
-        painter.setPen(QColor(255, 255, 255));
-        painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("暂停\n按 Esc 继续"));
-    }
-
     // 底部按键提示
     hudFont.setPixelSize(14);
     hudFont.setBold(false);
@@ -288,10 +326,17 @@ void GameWidget::keyPressEvent(QKeyEvent* event)
     case Qt::Key_J: lane = 2; break;
     case Qt::Key_K: lane = 3; break;
     case Qt::Key_Escape:
+        if (!m_gameActive) {
+            return;
+        }
         if (m_paused) {
             resumeGame();
-        } else if (m_gameActive) {
+            m_pauseOverlay->hide();
+        } else {
             pauseGame();
+            m_pauseOverlay->setGeometry(0, 0, width(), height());
+            m_pauseOverlay->show();
+            m_continueBtn->setFocus();
         }
         return;
     default:

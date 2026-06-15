@@ -113,6 +113,7 @@
     <QtMoc Include="include\GameWidget.h" />
     <QtMoc Include="include\ResultWidget.h" />
     <QtMoc Include="include\ScoreManager.h" />
+    <QtMoc Include="include\CacheManager.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="game.cpp" />
@@ -132,6 +133,7 @@
     <ClCompile Include="src\GameWidget.cpp" />
     <ClCompile Include="src\ResultWidget.cpp" />
     <ClCompile Include="src\ScoreManager.cpp" />
+    <ClCompile Include="src\CacheManager.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

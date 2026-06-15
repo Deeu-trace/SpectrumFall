@@ -33,6 +33,14 @@ AudioEngine::~AudioEngine()
 {
 }
 
+void AudioEngine::applyPendingSource()
+{
+    if (!m_pendingSource.isEmpty()) {
+        m_player->setSource(m_pendingSource);
+        m_pendingSource.clear();
+    }
+}
+
 bool AudioEngine::loadFile(const QString& path)
 {
     m_loaded = false;
@@ -44,9 +52,16 @@ bool AudioEngine::loadFile(const QString& path)
     // 根据扩展名分发到不同解析器
     if (path.endsWith(".mp3", Qt::CaseInsensitive)) {
         success = parseMp3(path);
-    } else {
-        // 默认尝试 WAV 解析
+    } else if (path.endsWith(".wav", Qt::CaseInsensitive)) {
         success = parseWav(path);
+    } else if (path.endsWith(".flac", Qt::CaseInsensitive)) {
+        qWarning() << "AudioEngine: FLAC format is not supported for PCM analysis:" << path;
+        emit loadComplete(false);
+        return false;
+    } else {
+        qWarning() << "AudioEngine: unsupported audio format:" << path;
+        emit loadComplete(false);
+        return false;
     }
 
     if (!success) {
@@ -59,9 +74,10 @@ bool AudioEngine::loadFile(const QString& path)
     if (QThread::currentThread() == thread()) {
         m_player->setSource(sourceUrl);
     } else {
-        QMetaObject::invokeMethod(m_player, [this, sourceUrl]() {
-            m_player->setSource(sourceUrl);
-        }, Qt::BlockingQueuedConnection);
+        // 使用 QMetaObject::invokeMethod 的非 lambda 重载，避免 findChild<T>() 模板实例化
+        // 将 URL 暂存，通过信号在主线程中设置
+        m_pendingSource = sourceUrl;
+        QMetaObject::invokeMethod(this, "applyPendingSource", Qt::BlockingQueuedConnection);
     }
     m_loaded = true;
     emit loadComplete(true);
@@ -105,6 +121,8 @@ qint64 AudioEngine::position() const
 
 qint64 AudioEngine::duration() const
 {
+    // 优先使用 PCM 解析得到的时长（线程安全，后台线程可调用）
+    if (m_durationMs > 0) return m_durationMs;
     return m_player->duration();
 }
 
