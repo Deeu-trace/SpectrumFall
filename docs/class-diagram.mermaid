@@ -1,0 +1,290 @@
+classDiagram
+    direction TB
+
+    class MainWindow {
+        -QStackedWidget* m_stack
+        -AudioEngine* m_audioEngine
+        -FFTProcessor* m_fftProcessor
+        -BeatDetector* m_beatDetector
+        -GameEngine* m_gameEngine
+        -MainMenuPage* m_mainMenuPage
+        -SongSelectPage* m_songSelectPage
+        -VisualizationPage* m_visPage
+        -GamePage* m_gamePage
+        -ResultPage* m_resultPage
+        -QString m_currentSongPath
+        +MainWindow(QWidget* parent)
+        -void setupUI()
+        -void connectSignals()
+        -void navigateTo(int pageIndex)
+        -void onSongSelected(QString path)
+        -void onStartVisualization()
+        -void onStartGame()
+        -void onGameFinished()
+    }
+
+    class AudioEngine {
+        -QMediaPlayer* m_player
+        -QAudioOutput* m_audioOutput
+        -QAudioDecoder* m_decoder
+        -QVector~float~ m_pcmLeft
+        -QVector~float~ m_pcmRight
+        -int m_sampleRate
+        -int m_channels
+        -qint64 m_durationMs
+        -bool m_decodeComplete
+        +AudioEngine(QObject* parent)
+        +~AudioEngine()
+        +void loadFile(QString path)
+        +void play()
+        +void pause()
+        +void seek(qint64 ms)
+        +void setVolume(float vol)
+        +void setPlaybackRate(qreal rate)
+        +QMediaPlayer::PlaybackState state() const
+        +qint64 position() const
+        +qint64 duration() const
+        +int sampleRate() const
+        +const QVector~float~& pcmData() const
+        +QVector~float~ getWindowAt(qint64 ms, int windowSize) const
+        +bool isDecodeComplete() const
+        +signals: void positionChanged(qint64 ms)
+        +signals: void durationChanged(qint64 ms)
+        +signals: void decodeComplete()
+        +signals: void playbackStateChanged(QMediaPlayer::PlaybackState)
+        -void onDecoderBufferReady()
+        -void onDecoderFinished()
+    }
+
+    class FFTProcessor {
+        -int m_windowSize
+        -QVector~float~ m_hannWindow
+        -QVector~float~ m_twiddleCos
+        -QVector~float~ m_twiddleSin
+        +FFTProcessor(int windowSize)
+        +void setWindowSize(int size)
+        +int windowSize() const
+        +void compute(QVector~float~ input, QVector~float~& magnitude)
+        -void cooleyTukey(QVector~float~& real, QVector~float~& imag)
+        -void buildTwiddleFactors()
+        -void buildHannWindow()
+    }
+
+    class BeatDetector {
+        -float m_bpm
+        -QVector~qint64~ m_beatPositionsMs
+        -int m_fftSize
+        -int m_hopSize
+        +BeatDetector(QObject* parent)
+        +void analyze(const QVector~float~& pcm, int sampleRate)
+        +float bpm() const
+        +const QVector~qint64~& beatPositions() const
+        +QVector~Note~ generateNotes(Difficulty difficulty) const
+        -QVector~float~ computeSpectralFlux(const QVector~float~& pcm, int sampleRate)
+        -QVector~int~ findPeaks(const QVector~float~& flux, float threshold)
+        -float estimateBPM(const QVector~int~& peakFrames, int hopSize, int sampleRate)
+        -float adaptiveThreshold(const QVector~float~& flux, int index, int windowSize)
+    }
+
+    class Note {
+        +qint64 timestamp
+        +int lane
+        +NoteType type
+        +qint64 holdDuration
+        +Note() = default
+        +Note(qint64 ts, int ln, NoteType tp, qint64 holdDur)
+    }
+
+    class NoteType {
+        <<enum>>
+        TAP = 0
+        HOLD = 1
+    }
+
+    class Difficulty {
+        <<enum>>
+        EASY = 0
+        NORMAL = 1
+        HARD = 2
+    }
+
+    class GameEngine {
+        -QVector~Note~ m_notes
+        -QSet~int~ m_judgedIndices
+        -int m_score
+        -int m_combo
+        -int m_maxCombo
+        -int m_perfectCount
+        -int m_goodCount
+        -int m_missCount
+        -qint64 m_currentPositionMs
+        -float m_scrollSpeed
+        -QElapsedTimer m_elapsedTimer
+        +GameEngine(QObject* parent)
+        +void loadNotes(QVector~Note~ notes, float bpm)
+        +void start()
+        +void pause()
+        +void resume()
+        +JudgeResult onKeyPress(int lane)
+        +void updatePosition()
+        +qint64 currentPosition() const
+        +int score() const
+        +int combo() const
+        +int maxCombo() const
+        +int perfectCount() const
+        +int goodCount() const
+        +int missCount() const
+        +QVector~Note~ visibleNotes() const
+        +void reset()
+        +signals: void scoreChanged(int score)
+        +signals: void comboChanged(int combo)
+        +signals: void judgmentMade(JudgeResult result, int lane)
+        +signals: void noteMissed(int lane)
+    }
+
+    class JudgeResult {
+        <<enum>>
+        PERFECT = 0
+        GOOD = 1
+        MISS = 2
+    }
+
+    class SpectrumBarWidget {
+        -QVector~float~ m_magnitude
+        -int m_barCount
+        -QColor m_barColor
+        +SpectrumBarWidget(QWidget* parent)
+        +void setSpectrumData(QVector~float~ magnitude)
+        -void paintEvent(QPaintEvent* event) override
+    }
+
+    class CircularSpectrumWidget {
+        -QVector~float~ m_magnitude
+        -int m_segments
+        +CircularSpectrumWidget(QWidget* parent)
+        +void setSpectrumData(QVector~float~ magnitude)
+        -void paintEvent(QPaintEvent* event) override
+    }
+
+    class WaveformWidget {
+        -QVector~float~ m_samples
+        +WaveformWidget(QWidget* parent)
+        +void setWaveformData(QVector~float~ samples)
+        -void paintEvent(QPaintEvent* event) override
+    }
+
+    class WaterfallWidget {
+        -QList~QVector~float~~ m_history
+        -int m_maxHistory
+        +WaterfallWidget(QWidget* parent)
+        +void setSpectrumData(QVector~float~ magnitude)
+        -void paintEvent(QPaintEvent* event) override
+    }
+
+    class MainMenuPage {
+        -QPushButton* m_selectSongBtn
+        -QPushButton* m_settingsBtn
+        -QPushButton* m_exitBtn
+        +MainMenuPage(QWidget* parent)
+        +signals: void songSelectRequested()
+        +signals: void exitRequested()
+    }
+
+    class SongSelectPage {
+        -QListWidget* m_songList
+        -QPushButton* m_visualizeBtn
+        -QPushButton* m_gameBtn
+        -QPushButton* m_backBtn
+        -QLabel* m_bpmLabel
+        -QString m_selectedPath
+        +SongSelectPage(QWidget* parent)
+        +void setSongs(QStringList paths)
+        +QString selectedSong() const
+        +void setBpmDisplay(float bpm)
+        +signals: void songSelected(QString path)
+        +signals: void visualizeRequested()
+        +signals: void gameRequested()
+        +signals: void backRequested()
+    }
+
+    class VisualizationPage {
+        -QStackedWidget* m_visStack
+        -SpectrumBarWidget* m_barWidget
+        -CircularSpectrumWidget* m_circularWidget
+        -WaveformWidget* m_waveformWidget
+        -WaterfallWidget* m_waterfallWidget
+        -QPushButton* m_playPauseBtn
+        -QSlider* m_positionSlider
+        -QSlider* m_volumeSlider
+        -QComboBox* m_fftSizeCombo
+        -QComboBox* m_visModeCombo
+        -QLabel* m_timeLabel
+        +VisualizationPage(QWidget* parent)
+        +void setSpectrumData(QVector~float~ magnitude)
+        +void setWaveformData(QVector~float~ samples)
+        +void setPlaybackState(QMediaPlayer::PlaybackState state)
+        +void setPosition(qint64 ms)
+        +void setDuration(qint64 ms)
+        +signals: void playPauseClicked()
+        +signals: void seekRequested(qint64 ms)
+        +signals: void volumeChanged(float vol)
+        +signals: void fftSizeChanged(int size)
+        +signals: void visModeChanged(int index)
+        +signals: void backRequested()
+    }
+
+    class GamePage {
+        -GameEngine* m_engine
+        -QTimer* m_renderTimer
+        -QLabel* m_scoreLabel
+        -QLabel* m_comboLabel
+        -QLabel* m_judgeLabel
+        -QMap~int, bool~ m_keyPressed
+        -float m_judgeLineY
+        -float m_noteSpeed
+        +GamePage(GameEngine* engine, QWidget* parent)
+        +void startGame()
+        +void pauseGame()
+        -void paintEvent(QPaintEvent* event) override
+        -void keyPressEvent(QKeyEvent* event) override
+        -void keyReleaseEvent(QKeyEvent* event) override
+        -void onRenderTick()
+        -void onJudgeResult(JudgeResult result, int lane)
+        +signals: void gameFinished()
+        +signals: void pauseRequested()
+    }
+
+    class ResultPage {
+        -QLabel* m_scoreLabel
+        -QLabel* m_gradeLabel
+        -QLabel* m_perfectLabel
+        -QLabel* m_goodLabel
+        -QLabel* m_missLabel
+        -QLabel* m_maxComboLabel
+        -QPushButton* m_retryBtn
+        -QPushButton* m_backBtn
+        +ResultPage(QWidget* parent)
+        +void setResult(int score, int perfect, int good, int miss, int maxCombo)
+        +signals: void retryRequested()
+        +signals: void backRequested()
+    }
+
+    MainWindow --> AudioEngine : 持有
+    MainWindow --> FFTProcessor : 持有
+    MainWindow --> BeatDetector : 持有
+    MainWindow --> GameEngine : 持有
+    MainWindow --> MainMenuPage : 持有
+    MainWindow --> SongSelectPage : 持有
+    MainWindow --> VisualizationPage : 持有
+    MainWindow --> GamePage : 持有
+    MainWindow --> ResultPage : 持有
+    VisualizationPage --> SpectrumBarWidget : 持有
+    VisualizationPage --> CircularSpectrumWidget : 持有
+    VisualizationPage --> WaveformWidget : 持有
+    VisualizationPage --> WaterfallWidget : 持有
+    GamePage --> GameEngine : 引用
+    GameEngine --> Note : 使用
+    BeatDetector --> Note : 生成
+    Note --> NoteType : 包含
+    AudioEngine --> QMediaPlayer : 持有
+    AudioEngine --> QAudioDecoder : 持有

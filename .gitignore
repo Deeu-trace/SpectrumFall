@@ -1,56 +1,89 @@
-# C++ objects and libs
-*.slo
-*.lo
-*.o
-*.a
-*.la
-*.lai
-*.so
-*.so.*
-*.dll
-*.dylib
-
-# Qt-es
-object_script.*.Release
-object_script.*.Debug
-*_plugin_import.cpp
-/.qmake.cache
-/.qmake.stash
-*.pro.user
-*.pro.user.*
-*.qbs.user
-*.qbs.user.*
-*.moc
+# ==============================================
+# Qt 6 官方忽略规则
+# ==============================================
+*.user
+*.user.*
+*.autosave
+build-*/
+Debug/
+Release/
 moc_*.cpp
-moc_*.h
 qrc_*.cpp
 ui_*.h
-*.qmlc
-*.jsc
-Makefile*
-*build-*
-build/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+Makefile
+.qmake.stash
 *.qm
 *.prl
-*.qmlls.ini
+*.app
+*.pro.user
+*.qbs.user
 
-# Qt unit tests
-target_wrapper.*
-
-# QtCreator
-*.autosave
-
-# QtCreator Qml
-*.qmlproject.user
-*.qmlproject.user.*
-
-# QtCreator CMake
-CMakeLists.txt.user*
-
-# QtCreator 4.8< compilation database
+# ==============================================
+# CMake 构建产物（必须加）
+# ==============================================
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
 compile_commands.json
+CTestTestfile.cmake
+_deps/
+cmake-build-*/
+*.cmake
+install/
+bin/
+lib/
 
-# QtCreator local machine specific files for imported projects
-*creator.user*
+# ==============================================
+# Visual Studio 2019/2022 超大缓存（本次问题根源）
+# ==============================================
+.vs/
+x64/
+x86/
+*.ipch
+*.pdb
+*.ilk
+*.suo
+*.sdf
+*.opensdf
+*.cache
+*.log
+*.tlog
+*.obj
+*.pch
+*.res
+*.rc2
 
-*_qmlcache.qrc
+# ==============================================
+# IDE 配置
+# ==============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ==============================================
+# 项目特有忽略
+# ==============================================
+screenshots/
+examples/*.mp3
+examples/*.wav
+examples/*.flac
+*.mp3
+*.wav
+*.flac
+
+# ==============================================
+# 系统文件
+# ==============================================
+.DS_Store
+Thumbs.db
+desktop.ini

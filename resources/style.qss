@@ -1,0 +1,233 @@
+/* 全局霓虹风格 QSS — Rhythm Wave 主题 */
+
+/* 全局背景 */
+QWidget {
+    background-color: #1a1a2e;
+    color: #e0e0e0;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+/* 主窗口 */
+QMainWindow {
+    background-color: #1a1a2e;
+}
+
+/* QStackedWidget */
+QStackedWidget {
+    background-color: #1a1a2e;
+}
+
+/* 按钮通用样式 */
+QPushButton {
+    background-color: #0f3460;
+    color: #e0e0e0;
+    border: 1px solid #16213e;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 14px;
+    min-height: 20px;
+}
+
+QPushButton:hover {
+    background-color: #1a4a80;
+    border-color: #00ff88;
+    color: #00ff88;
+}
+
+QPushButton:pressed {
+    background-color: #0f3460;
+    border-color: #bd93f9;
+    color: #bd93f9;
+}
+
+QPushButton:disabled {
+    background-color: #16213e;
+    color: #555555;
+    border-color: #16213e;
+}
+
+/* 菜单按钮 */
+QPushButton#menuButton {
+    background-color: #0f3460;
+    color: #00ff88;
+    border: 2px solid #00ff88;
+    border-radius: 8px;
+    padding: 12px 24px;
+    font-size: 18px;
+    font-weight: bold;
+    min-height: 24px;
+}
+
+QPushButton#menuButton:hover {
+    background-color: #00ff88;
+    color: #1a1a2e;
+}
+
+/* 动作按钮 */
+QPushButton#actionButton {
+    background-color: #0f3460;
+    color: #00ff88;
+    border: 1px solid #00ff88;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: bold;
+}
+
+QPushButton#actionButton:hover {
+    background-color: #00ff88;
+    color: #1a1a2e;
+}
+
+QPushButton#actionButton:disabled {
+    background-color: #16213e;
+    color: #555555;
+    border-color: #16213e;
+}
+
+/* 返回按钮 */
+QPushButton#backButton {
+    background-color: transparent;
+    color: #bd93f9;
+    border: 1px solid #bd93f9;
+    border-radius: 6px;
+    padding: 8px 16px;
+}
+
+QPushButton#backButton:hover {
+    background-color: #bd93f9;
+    color: #1a1a2e;
+}
+
+/* 播放按钮 */
+QPushButton#playButton {
+    background-color: #0f3460;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+}
+
+QPushButton#playButton:hover {
+    background-color: #1a4a80;
+    color: #00ff88;
+}
+
+/* 滑块 */
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #16213e;
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    background: #00ff88;
+    width: 14px;
+    height: 14px;
+    margin: -4px 0;
+    border-radius: 7px;
+}
+
+QSlider::sub-page:horizontal {
+    background: #0f3460;
+    border-radius: 3px;
+}
+
+/* 下拉框 */
+QComboBox {
+    background-color: #0f3460;
+    color: #e0e0e0;
+    border: 1px solid #16213e;
+    border-radius: 4px;
+    padding: 4px 8px;
+    min-height: 20px;
+}
+
+QComboBox:hover {
+    border-color: #00ff88;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    selection-background-color: #0f3460;
+    selection-color: #00ff88;
+}
+
+/* 歌曲列表 */
+QListWidget#songList {
+    background-color: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: 4px;
+    outline: none;
+}
+
+QListWidget#songList::item {
+    padding: 8px;
+    border-radius: 4px;
+}
+
+QListWidget#songList::item:selected {
+    background-color: #0f3460;
+    color: #00ff88;
+}
+
+QListWidget#songList::item:hover {
+    background-color: #1a2a4a;
+}
+
+/* 控制面板 */
+QWidget#controlPanel {
+    background-color: #16213e;
+    border-top: 1px solid #0f3460;
+    border-radius: 4px;
+}
+
+/* 统计面板 */
+QWidget#statsPanel {
+    background-color: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 15px;
+}
+
+/* 标签 */
+QLabel {
+    background: transparent;
+}
+
+/* 滚动条 */
+QScrollBar:vertical {
+    background: #1a1a2e;
+    width: 8px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical {
+    background: #0f3460;
+    border-radius: 4px;
+    min-height: 20px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+/* 列表通用 */
+QListWidget {
+    background-color: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+}
+
+QListWidget::item:selected {
+    background-color: #0f3460;
+    color: #00ff88;
+}

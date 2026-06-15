@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="game">
+        <file>resources/style.qss</file>
+    </qresource>
+</RCC>
