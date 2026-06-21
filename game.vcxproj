@@ -37,12 +37,12 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="QtSettings">
     <QtInstall>6.11.1_msvc2022_64</QtInstall>
-    <QtModules>core;gui;widgets;multimedia;multimediawidgets;concurrent</QtModules>
+    <QtModules>core;gui;widgets;multimedia;multimediawidgets;concurrent;opengl;openglwidgets</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="QtSettings">
     <QtInstall>6.11.1_msvc2022_64</QtInstall>
-    <QtModules>core;gui;widgets;multimedia;multimediawidgets;concurrent</QtModules>
+    <QtModules>core;gui;widgets;multimedia;multimediawidgets;concurrent;opengl;openglwidgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
@@ -114,6 +114,7 @@
     <QtMoc Include="include\ResultWidget.h" />
     <QtMoc Include="include\ScoreManager.h" />
     <QtMoc Include="include\CacheManager.h" />
+    <QtMoc Include="include\GLSpectrumWidget.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="game.cpp" />
@@ -134,6 +135,7 @@
     <ClCompile Include="src\ResultWidget.cpp" />
     <ClCompile Include="src\ScoreManager.cpp" />
     <ClCompile Include="src\CacheManager.cpp" />
+    <ClCompile Include="src\GLSpectrumWidget.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

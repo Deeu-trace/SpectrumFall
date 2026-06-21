@@ -6,6 +6,7 @@
 #include "CircularSpectrumVisualizer.h"
 #include "WaveformVisualizer.h"
 #include "WaterfallVisualizer.h"
+#include "GLSpectrumWidget.h"
 
 #include <QPushButton>
 #include <QSlider>
@@ -35,11 +36,13 @@ VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* pare
     m_circularWidget = new CircularSpectrumVisualizer(this);
     m_waveformWidget = new WaveformVisualizer(this);
     m_waterfallWidget = new WaterfallVisualizer(this);
+    m_glWidget = new GLSpectrumWidget(this);
 
     m_visStack->addWidget(m_barWidget);       // 索引 0
     m_visStack->addWidget(m_circularWidget);   // 索引 1
     m_visStack->addWidget(m_waveformWidget);   // 索引 2
     m_visStack->addWidget(m_waterfallWidget);  // 索引 3
+    m_visStack->addWidget(m_glWidget);         // 索引 4：GLSL 着色器频谱
 
     layout->addWidget(m_visStack, 1);
 
@@ -99,7 +102,8 @@ VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* pare
 
     m_visModeCombo = new QComboBox(this);
     m_visModeCombo->addItems({QStringLiteral("柱状频谱"), QStringLiteral("圆形频谱"),
-                              QStringLiteral("波形"), QStringLiteral("瀑布图")});
+                              QStringLiteral("波形"), QStringLiteral("瀑布图"),
+                              QStringLiteral("GL 霓虹"), QStringLiteral("GL 圆形")});
     m_visModeCombo->setFixedWidth(100);
     btnLayout->addWidget(m_visModeCombo);
 
@@ -206,6 +210,10 @@ void VisualizationWidget::onRenderTick()
     } else if (visIndex == 3) {
         // 瀑布图
         m_waterfallWidget->setSpectrumData(processed);
+    } else if (visIndex == 4) {
+        // GLSL 霓虹频谱（传原始 magnitude，着色器内部处理压缩）
+        m_glWidget->setSpectrumData(processed);
+        m_glWidget->setCompressionPower(1.0f);  // process() 已压缩过，着色器不再二次压缩
     }
 }
 
@@ -239,7 +247,16 @@ void VisualizationWidget::onVolumeChanged(int value)
 
 void VisualizationWidget::onVisModeChanged(int index)
 {
-    m_visStack->setCurrentIndex(index);
+    if (index == 5) {
+        // GL 圆形：复用 GL widget（stack 索引 4），切换为圆形模式
+        m_glWidget->setRenderMode(GLSpectrumWidget::Circular);
+        m_visStack->setCurrentIndex(4);
+    } else {
+        if (index == 4) {
+            m_glWidget->setRenderMode(GLSpectrumWidget::Bars);
+        }
+        m_visStack->setCurrentIndex(index);
+    }
 }
 
 void VisualizationWidget::onFftSizeChanged(int index)

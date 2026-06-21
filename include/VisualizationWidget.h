@@ -9,6 +9,7 @@ class BarSpectrumVisualizer;
 class CircularSpectrumVisualizer;
 class WaveformVisualizer;
 class WaterfallVisualizer;
+class GLSpectrumWidget;
 class QPushButton;
 class QSlider;
 class QComboBox;
@@ -54,6 +55,7 @@ private:
     CircularSpectrumVisualizer* m_circularWidget;///< 圆形频谱
     WaveformVisualizer* m_waveformWidget;     ///< 波形
     WaterfallVisualizer* m_waterfallWidget;   ///< 瀑布图
+    GLSpectrumWidget* m_glWidget;             ///< GLSL 着色器频谱（粒子+霓虹）
     QPushButton* m_playPauseBtn;             ///< 播放/暂停按钮
     QPushButton* m_backBtn;                  ///< 返回按钮
     QSlider* m_positionSlider;               ///< 进度滑块

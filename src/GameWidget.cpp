@@ -12,7 +12,10 @@
 #include <QHBoxLayout>
 #include <QFrame>
 #include <QApplication>
+#include <QDateTime>
+#include <QtMath>
 #include <cmath>
+#include <random>
 
 // 判定线和轨道参数常量
 static constexpr qreal SCROLL_SPEED = 0.35;     // 像素/毫秒（下落速度，降低让玩家有更多反应时间）
@@ -29,6 +32,13 @@ static constexpr int DEFAULT_GLOBAL_MIN_GAP_MS = 300;  // 默认跨轨道最小�
 static constexpr int GLOBAL_MIN_GAP_MS = 100;          // 全局滑块最小值
 static constexpr int GLOBAL_MAX_GAP_MS = 800;          // 全局滑块最大值
 static constexpr int GLOBAL_GAP_STEP_MS = 50;          // 全局滑块步进
+
+static float randFloat() {
+    // 使用 C++ 标准库的随机数生成替代 qrand
+    static thread_local std::mt19937 generator(static_cast<unsigned int>(QDateTime::currentMSecsSinceEpoch() & 0xffffffff));
+    static thread_local std::uniform_real_distribution<float> distribution(0.0f, 1.0f);
+    return distribution(generator);
+}
 
 GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWidget* parent)
     : QWidget(parent)
@@ -47,6 +57,10 @@ GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWi
     , m_startPosMs(0)
     , m_pauseElapsedMs(0)
     , m_totalPausedMs(0)
+    , m_judgeLinePulse(0.0)
+    , m_comboScale(1.0)
+    , m_lastCombo(0)
+    , m_lastFrameTime(0)
 {
     m_renderTimer->setInterval(16); // ~60Hz
 
@@ -65,7 +79,19 @@ GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWi
         connect(m_scoreManager, &ScoreManager::comboChanged, this, [this](int) { update(); });
     }
 
+    generateStars();
     setupPauseOverlay();
+}
+
+void GameWidget::generateStars()
+{
+    m_stars.clear();
+    m_starPhases.clear();
+    // qsrand(QDateTime::currentMSecsSinceEpoch()); // 移除未定义的 qsrand
+    for (int i = 0; i < 50; ++i) {
+        m_stars.append(QPointF(randFloat(), randFloat()));
+        m_starPhases.append(randFloat() * 6.28318f);
+    }
 }
 
 void GameWidget::setupPauseOverlay()
@@ -324,6 +350,13 @@ void GameWidget::startGame(const QVector<GameNote>& notes)
     m_startPosMs = 0;
     m_pauseElapsedMs = 0;
     m_totalPausedMs = 0;
+    m_judgeLinePulse = 0.0;
+    m_comboScale = 1.0;
+    m_lastCombo = 0;
+    m_lastFrameTime = 0;
+    m_particles.clear();
+    m_rings.clear();
+    m_popups.clear();
 
     // 重置分数
     if (m_scoreManager) {
@@ -389,146 +422,242 @@ void GameWidget::paintEvent(QPaintEvent* event)
 
     int w = width();
     int h = height();
+    qint64 gameTime = getGameTime();
+    float timeSec = gameTime / 1000.0f;
 
-    // 背景
-    painter.fillRect(rect(), QColor(20, 20, 40));
+    // ═══ 1. 赛博朋克背景 ═══
+    // 深色径向渐变
+    QRadialGradient bgGrad(w / 2.0, h / 2.0, w * 0.7);
+    bgGrad.setColorAt(0.0, QColor(18, 16, 45));
+    bgGrad.setColorAt(1.0, QColor(5, 5, 18));
+    painter.fillRect(rect(), bgGrad);
 
-    // 计算轨道参数
+    // 星光
+    painter.setPen(Qt::NoPen);
+    for (int i = 0; i < m_stars.size(); ++i) {
+        float twinkle = 0.3f + 0.7f * (0.5f + 0.5f * std::sin(timeSec * (0.8f + m_starPhases[i] * 0.3f) + m_starPhases[i]));
+        int alpha = static_cast<int>(120 * twinkle);
+        int sz = (i % 5 == 0) ? 2 : 1;
+        painter.setBrush(QColor(140, 180, 255, alpha));
+        painter.drawEllipse(QPointF(m_stars[i].x() * w, m_stars[i].y() * h), sz, sz);
+        // 十字光芒（大星）
+        if (i % 7 == 0 && twinkle > 0.6f) {
+            painter.setPen(QPen(QColor(140, 180, 255, alpha / 2), 0.5));
+            qreal sx = m_stars[i].x() * w;
+            qreal sy = m_stars[i].y() * h;
+            painter.drawLine(QPointF(sx - 4, sy), QPointF(sx + 4, sy));
+            painter.drawLine(QPointF(sx, sy - 4), QPointF(sx, sy + 4));
+            painter.setPen(Qt::NoPen);
+        }
+    }
+
+    // 低音波纹（从判定线中心扩散）
+    for (int r = 0; r < 3; ++r) {
+        float waveTime = std::fmod(timeSec * 0.4f + r * 0.333f, 1.0f);
+        qreal waveR = waveTime * w * 0.5;
+        int waveAlpha = static_cast<int>(60 * (1.0f - waveTime) * (waveTime > 0.05f ? 1.0f : waveTime / 0.05f));
+        painter.setBrush(QColor(30, 80, 150, waveAlpha));
+        painter.drawEllipse(QPointF(w / 2.0, h * m_judgeLineY), waveR, waveR * 0.3);
+    }
+
+    // ═══ 2. 轨道参数 ═══
     m_trackWidth = qMax(60.0, w * 0.12);
     qreal totalTrackWidth = m_trackWidth * LANE_COUNT;
     qreal startX = (w - totalTrackWidth) / 2.0;
     qreal judgeY = h * m_judgeLineY;
 
-    // 绘制轨道背景
+    // ═══ 3. 轨道灯带 ═══
     for (int i = 0; i < LANE_COUNT; ++i) {
         qreal x = startX + i * m_trackWidth;
-        QColor trackBg = (i % 2 == 0) ? QColor(30, 30, 55, 100) : QColor(25, 25, 50, 100);
+        QColor lc = laneColor(i);
+
+        // 轨道背景（交替深色）
+        QColor trackBg = (i % 2 == 0) ? QColor(25, 22, 50, 80) : QColor(20, 18, 42, 80);
         painter.fillRect(QRectF(x, 0, m_trackWidth, h), trackBg);
 
-        // 轨道边线
-        painter.setPen(QColor(60, 60, 100, 80));
+        // 左侧灯带
+        QLinearGradient leftGlow(x, 0, x + 6, 0);
+        leftGlow.setColorAt(0.0, QColor(lc.red(), lc.green(), lc.blue(), 60));
+        leftGlow.setColorAt(1.0, QColor(lc.red(), lc.green(), lc.blue(), 0));
+        painter.fillRect(QRectF(x, 0, 6, h), leftGlow);
+
+        // 右侧灯带
+        QLinearGradient rightGlow(x + m_trackWidth - 6, 0, x + m_trackWidth, 0);
+        rightGlow.setColorAt(0.0, QColor(lc.red(), lc.green(), lc.blue(), 0));
+        rightGlow.setColorAt(1.0, QColor(lc.red(), lc.green(), lc.blue(), 60));
+        painter.fillRect(QRectF(x + m_trackWidth - 6, 0, 6, h), rightGlow);
+
+        // 按键时灯带加亮
+        if (m_keyPressed.value(i, false)) {
+            QLinearGradient pressGlow(x, 0, x + m_trackWidth, 0);
+            pressGlow.setColorAt(0.0, QColor(lc.red(), lc.green(), lc.blue(), 0));
+            pressGlow.setColorAt(0.5, QColor(lc.red(), lc.green(), lc.blue(), 30));
+            pressGlow.setColorAt(1.0, QColor(lc.red(), lc.green(), lc.blue(), 0));
+            painter.fillRect(QRectF(x, 0, m_trackWidth, h), pressGlow);
+        }
+    }
+
+    // 轨道边线
+    for (int i = 0; i <= LANE_COUNT; ++i) {
+        qreal x = startX + i * m_trackWidth;
+        painter.setPen(QPen(QColor(60, 60, 100, 60), 1));
         painter.drawLine(QPointF(x, 0), QPointF(x, h));
     }
-    // 最后一根边线
-    painter.setPen(QColor(60, 60, 100, 80));
-    painter.drawLine(QPointF(startX + totalTrackWidth, 0), QPointF(startX + totalTrackWidth, h));
 
-    // 绘制判定线（发光效果）
-    QLinearGradient judgeGlow(startX, judgeY - 15, startX, judgeY + 15);
+    // ═══ 4. 音符（霓虹化）═══
+    if (m_gameActive) {
+        qreal noteHeight = 14;
+
+        for (const GameNote& note : m_notes) {
+            if (note.judged) continue;
+
+            qint64 timeDelta = note.timestampMs - gameTime;
+            qreal noteY = judgeY - timeDelta * m_noteSpeed;
+
+            if (noteY < -noteHeight * 2 || noteY > h + noteHeight) continue;
+
+            qreal noteX = startX + note.lane * m_trackWidth + 4;
+            qreal noteW = m_trackWidth - 8;
+            QColor color = laneColor(note.lane);
+
+            if (m_keyPressed.value(note.lane, false)) {
+                color = color.lighter(160);
+            }
+
+            // 音符主体（渐变填充）
+            QLinearGradient noteFill(noteX, noteY - noteHeight / 2, noteX, noteY + noteHeight / 2);
+            noteFill.setColorAt(0.0, color.lighter(140));
+            noteFill.setColorAt(0.5, color);
+            noteFill.setColorAt(1.0, color.darker(160));
+            painter.setBrush(noteFill);
+            painter.setPen(QPen(color.lighter(180), 1.5));
+            painter.drawRoundedRect(QRectF(noteX, noteY - noteHeight / 2, noteW, noteHeight), 5, 5);
+        }
+    }
+
+    // ═══ 5. 判定线 ═══
+    qreal glowH = 18;
+
+    QLinearGradient judgeGlow(startX, judgeY - glowH, startX, judgeY + glowH);
     judgeGlow.setColorAt(0.0, QColor(0, 255, 136, 0));
-    judgeGlow.setColorAt(0.4, QColor(0, 255, 136, 100));
-    judgeGlow.setColorAt(0.5, QColor(0, 255, 136, 200));
-    judgeGlow.setColorAt(0.6, QColor(0, 255, 136, 100));
+    judgeGlow.setColorAt(0.4, QColor(0, 255, 136, 80));
+    judgeGlow.setColorAt(0.5, QColor(0, 255, 136, 220));
+    judgeGlow.setColorAt(0.6, QColor(0, 255, 136, 80));
     judgeGlow.setColorAt(1.0, QColor(0, 255, 136, 0));
     painter.setPen(Qt::NoPen);
     painter.setBrush(judgeGlow);
-    painter.drawRect(QRectF(startX, judgeY - 15, totalTrackWidth, 30));
+    painter.drawRect(QRectF(startX, judgeY - glowH, totalTrackWidth, glowH * 2));
 
     // 判定线主线
     painter.setPen(QPen(QColor(0, 255, 136, 255), 2));
     painter.drawLine(QPointF(startX, judgeY), QPointF(startX + totalTrackWidth, judgeY));
 
-    // 获取精确游戏时间（用于音符位置）
-    qint64 currentPos = getGameTime();
-
-    // 绘制音符
-    if (m_gameActive) {
-        qreal noteHeight = 12;
-
-        for (const GameNote& note : m_notes) {
-            if (note.judged) continue;
-
-            // 计算音符 Y 位置：正值表示音符在判定线上方，负值表示已过判定线
-            qint64 timeDelta = note.timestampMs - currentPos;
-            qreal noteY = judgeY - timeDelta * m_noteSpeed;
-
-            // 仅绘制可见范围内的音符
-            if (noteY < -noteHeight * 2 || noteY > h + noteHeight) {
-                continue;
-            }
-
-            qreal noteX = startX + note.lane * m_trackWidth + 4;
-            qreal noteW = m_trackWidth - 8;
-
-            // 音符颜色
-            QColor color = laneColor(note.lane);
-
-            // 按键高亮
-            if (m_keyPressed.value(note.lane, false)) {
-                color = color.lighter(150);
-            }
-
-            // 绘制音符
-            painter.setPen(Qt::NoPen);
-            painter.setBrush(color);
-            painter.drawRoundedRect(QRectF(noteX, noteY - noteHeight / 2, noteW, noteHeight), 4, 4);
-
-            // 音符辉光
-            QRadialGradient noteGlow(QPointF(noteX + noteW / 2, noteY), noteW * 0.6);
-            noteGlow.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), 60));
-            noteGlow.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 0));
-            painter.setBrush(noteGlow);
-            painter.drawEllipse(QPointF(noteX + noteW / 2, noteY), noteW * 0.6, noteHeight * 2);
-        }
-    }
-
-    // 按键按下时轨道底部高亮
+    // 按键时轨道底部高亮
     for (int i = 0; i < LANE_COUNT; ++i) {
         if (m_keyPressed.value(i, false)) {
             qreal x = startX + i * m_trackWidth;
             QColor color = laneColor(i);
-            QLinearGradient keyGlow(x, judgeY - 30, x, judgeY + 10);
+            QLinearGradient keyGlow(x, judgeY - 40, x, judgeY + 10);
             keyGlow.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), 0));
-            keyGlow.setColorAt(0.7, QColor(color.red(), color.green(), color.blue(), 80));
-            keyGlow.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 150));
+            keyGlow.setColorAt(0.7, QColor(color.red(), color.green(), color.blue(), 100));
+            keyGlow.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 180));
             painter.setPen(Qt::NoPen);
             painter.setBrush(keyGlow);
-            painter.drawRect(QRectF(x, judgeY - 30, m_trackWidth, 40));
+            painter.drawRect(QRectF(x, judgeY - 40, m_trackWidth, 50));
         }
     }
 
-    // 绘制判定文字动画
+    // ═══ 6. 命中反馈环 ═══
+    painter.setPen(Qt::NoPen);
+    for (const HitRing& ring : m_rings) {
+        float t = static_cast<float>(ring.age) / ring.maxAge;
+        qreal radius = ring.startRadius + (ring.endRadius - ring.startRadius) * t;
+        int alpha = static_cast<int>(200 * (1.0 - t));
+        painter.setBrush(QColor(ring.color.red(), ring.color.green(), ring.color.blue(), alpha));
+        painter.drawEllipse(QPointF(ring.x, ring.y), radius, radius);
+    }
+
+    // ═══ 7. 命中粒子 ═══
+    for (const HitParticle& p : m_particles) {
+        float t = static_cast<float>(p.age) / p.maxAge;
+        int alpha = static_cast<int>(255 * (1.0 - t));
+        painter.setBrush(QColor(p.color.red(), p.color.green(), p.color.blue(), alpha));
+        painter.drawEllipse(QPointF(p.x, p.y), p.size * (1.0 - t * 0.5), p.size * (1.0 - t * 0.5));
+    }
+
+    // ═══ 8. 判定文字动画（弹跳）═══
     if (m_judgeTextTimer > 0 && !m_judgeText.isEmpty()) {
         qreal textX = startX + (m_judgeTextLane + 0.5) * m_trackWidth;
-        qreal textY = judgeY - 60;
+        qreal textY = judgeY - 70;
+
+        float textProgress = 1.0f - static_cast<float>(m_judgeTextTimer) / 10.0f;
+        qreal scale = 1.0 + (1.0 - textProgress) * 0.5;  // 从 1.5 缩到 1.0
+        int alpha = qMin(255, m_judgeTextTimer * 30);
 
         QFont judgeFont;
-        judgeFont.setPixelSize(24);
+        judgeFont.setPixelSize(static_cast<int>(22 * scale));
         judgeFont.setBold(true);
         painter.setFont(judgeFont);
-        painter.setPen(m_judgeTextColor);
-
-        // 淡出效果
-        int alpha = qMin(255, m_judgeTextTimer * 25);
         QColor textColor = m_judgeTextColor;
         textColor.setAlpha(alpha);
         painter.setPen(textColor);
-        painter.drawText(QRectF(textX - 60, textY - 15, 120, 30),
+        painter.drawText(QRectF(textX - 80, textY - 20, 160, 40),
                          Qt::AlignCenter, m_judgeText);
     }
 
-    // HUD：分数和连击
+    // ═══ 9. 分数弹出动画 ═══
+    for (const ScorePopup& popup : m_popups) {
+        float t = static_cast<float>(popup.age) / popup.maxAge;
+        qreal yOffset = -40.0 * t;
+        int alpha = static_cast<int>(255 * (1.0 - t));
+        QFont popFont;
+        popFont.setPixelSize(static_cast<int>(16 + 8 * (1.0 - t)));
+        popFont.setBold(true);
+        painter.setFont(popFont);
+        QColor c = popup.color;
+        c.setAlpha(alpha);
+        painter.setPen(c);
+        painter.drawText(QRectF(popup.x - 60, popup.y + yOffset - 15, 120, 30),
+                         Qt::AlignCenter, popup.text);
+    }
+
+    // ═══ 10. HUD：分数和连击 ═══
     QFont hudFont;
     hudFont.setPixelSize(20);
     painter.setFont(hudFont);
-
-    // 分数
     painter.setPen(QColor(255, 255, 255));
     painter.drawText(15, 30, QStringLiteral("分数: %1").arg(
         m_scoreManager ? m_scoreManager->score() : 0));
 
-    // 连击
-    painter.setPen(QColor(0, 255, 136));
-    hudFont.setPixelSize(28);
-    hudFont.setBold(true);
-    painter.setFont(hudFont);
+    // Combo 大字动画
     int combo = m_scoreManager ? m_scoreManager->combo() : 0;
     if (combo > 0) {
-        painter.drawText(QRectF(0, 50, w, 40), Qt::AlignCenter,
+        hudFont.setPixelSize(static_cast<int>(32 * m_comboScale));
+        hudFont.setBold(true);
+        painter.setFont(hudFont);
+
+        // Combo 颜色：越高越炫
+        QColor comboColor;
+        if (combo < 10) comboColor = QColor(0, 255, 136);
+        else if (combo < 30) comboColor = QColor(100, 200, 255);
+        else if (combo < 50) comboColor = QColor(180, 120, 255);
+        else if (combo < 100) comboColor = QColor(255, 180, 50);
+        else comboColor = QColor(255, 80, 120);
+
+        // Combo 光晕
+        QRadialGradient comboGlow(w / 2.0, 75, 60 * m_comboScale);
+        comboGlow.setColorAt(0.0, QColor(comboColor.red(), comboColor.green(), comboColor.blue(), 40));
+        comboGlow.setColorAt(1.0, QColor(comboColor.red(), comboColor.green(), comboColor.blue(), 0));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(comboGlow);
+        painter.drawEllipse(QPointF(w / 2.0, 75), 80, 35);
+
+        painter.setPen(comboColor);
+        painter.drawText(QRectF(0, 50, w, 50), Qt::AlignCenter,
                          QStringLiteral("%1 Combo").arg(combo));
     }
 
-    // 底部按键提示 + 当前密度
+    // 底部按键提示 + 密度
     hudFont.setPixelSize(14);
     hudFont.setBold(false);
     painter.setFont(hudFont);
@@ -539,7 +668,6 @@ void GameWidget::paintEvent(QPaintEvent* event)
         painter.drawText(QRectF(x, h - 25, m_trackWidth, 20), Qt::AlignCenter, keys[i]);
     }
 
-    // 右下角显示当前密度
     painter.setPen(QColor(80, 80, 120));
     hudFont.setPixelSize(12);
     painter.setFont(hudFont);
@@ -608,6 +736,26 @@ void GameWidget::onRenderTick()
 {
     if (!m_gameActive || m_paused) return;
 
+    qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    qint64 deltaMs = (m_lastFrameTime > 0) ? (nowMs - m_lastFrameTime) : 16;
+    m_lastFrameTime = nowMs;
+
+    // 更新特效
+    updateEffects(deltaMs);
+
+    // 判定线脉冲衰减（已禁用）
+    // m_judgeLinePulse *= 0.85;
+
+    // Combo 弹跳回归
+    m_comboScale += (1.0 - m_comboScale) * 0.15;
+
+    // Combo 变化检测
+    int combo = m_scoreManager ? m_scoreManager->combo() : 0;
+    if (combo != m_lastCombo && combo > 0) {
+        m_comboScale = 1.4;  // 弹跳
+        m_lastCombo = combo;
+    }
+
     // 检查超时未击打的音符
     checkMissedNotes();
 
@@ -621,7 +769,6 @@ void GameWidget::onRenderTick()
     if (m_audioEngine) {
         qint64 dur = m_audioEngine->duration();
         if (gameTime >= dur && dur > 0) {
-            // 等待所有音符判定完毕
             bool allJudged = true;
             for (const GameNote& note : m_notes) {
                 if (!note.judged) {
@@ -649,7 +796,7 @@ void GameWidget::checkMissedNotes()
     for (GameNote& note : m_notes) {
         if (note.judged) continue;
 
-        // 音符超过判定线 + MISS_THRESHOLD 毫秒
+        // 音符超过判定线 + MISS_THRESHOLD 毫秒：标记为已判定但不弹 Miss 文字
         if (currentPos - note.timestampMs > MISS_THRESHOLD) {
             note.judged = true;
             note.judgment = 3; // Miss
@@ -658,11 +805,7 @@ void GameWidget::checkMissedNotes()
                 m_scoreManager->addMiss();
             }
 
-            // 显示 Miss 文字
-            m_judgeText = QStringLiteral("Miss");
-            m_judgeTextLane = note.lane;
-            m_judgeTextColor = QColor(233, 69, 96);
-            m_judgeTextTimer = 10;
+            // 不显示 Miss 文字，不生成特效
         }
     }
 }
@@ -709,6 +852,9 @@ void GameWidget::judgeLane(int lane)
     }
     m_judgeTextLane = lane;
     m_judgeTextTimer = 10;
+
+    // 生成命中特效
+    spawnHitEffect(lane, result);
 }
 
 QColor GameWidget::laneColor(int lane) const
@@ -727,4 +873,87 @@ qreal GameWidget::laneX(int lane) const
     qreal totalTrackWidth = m_trackWidth * LANE_COUNT;
     qreal startX = (width() - totalTrackWidth) / 2.0;
     return startX + lane * m_trackWidth;
+}
+
+void GameWidget::spawnHitEffect(int lane, int judgment)
+{
+    qreal cx = laneX(lane) + m_trackWidth / 2.0;
+    qreal cy = height() * m_judgeLineY;
+    QColor color = laneColor(lane);
+
+    // 判定线脉冲（已禁用）
+    // m_judgeLinePulse = 1.0;
+
+    // 命中反馈环（2 层，颜色不同）
+    QColor ringColor = (judgment == 1) ? QColor(0, 255, 136) :
+                       (judgment == 2) ? QColor(255, 220, 50) : QColor(233, 69, 96);
+    m_rings.append({cx, cy, ringColor, 0, 20, 5.0, 45.0});
+    m_rings.append({cx, cy, color, 0, 16, 0.0, 30.0});
+
+    // 粒子爆发（8-12 颗）
+    int particleCount = (judgment == 1) ? 12 : (judgment == 2) ? 8 : 4;
+    for (int i = 0; i < particleCount; ++i) {
+        float angle = randFloat() * 6.28318f;
+        float speed = 1.5f + randFloat() * 3.0f;
+        HitParticle p;
+        p.x = cx;
+        p.y = cy;
+        p.vx = std::cos(angle) * speed;
+        p.vy = std::sin(angle) * speed - 1.0f;  // 略微向上偏
+        p.color = (judgment == 1) ? color.lighter(130) :
+                  (judgment == 2) ? QColor(255, 220, 100) : QColor(200, 80, 100);
+        p.age = 0;
+        p.maxAge = 20 + static_cast<int>(randFloat() * 15);
+        p.size = 2.0f + randFloat() * 2.0f;
+        m_particles.append(p);
+    }
+
+    // 分数弹出
+    QString popupText;
+    QColor popupColor;
+    if (judgment == 1) {
+        popupText = QStringLiteral("+100");
+        popupColor = QColor(0, 255, 136);
+    } else if (judgment == 2) {
+        popupText = QStringLiteral("+50");
+        popupColor = QColor(255, 220, 50);
+    } else {
+        popupText = QStringLiteral("Miss");
+        popupColor = QColor(233, 69, 96);
+    }
+    m_popups.append({popupText, popupColor, cx, cy - 30, 0, 30});
+}
+
+void GameWidget::updateEffects(qint64 deltaTimeMs)
+{
+    float dt = deltaTimeMs / 16.0f;  // 归一化到 ~60fps
+
+    // 更新粒子
+    for (int i = m_particles.size() - 1; i >= 0; --i) {
+        HitParticle& p = m_particles[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy += 0.15f * dt;  // 重力
+        p.vx *= 0.97f;
+        p.age += static_cast<int>(dt);
+        if (p.age >= p.maxAge) {
+            m_particles.removeAt(i);
+        }
+    }
+
+    // 更新反馈环
+    for (int i = m_rings.size() - 1; i >= 0; --i) {
+        m_rings[i].age += static_cast<int>(dt);
+        if (m_rings[i].age >= m_rings[i].maxAge) {
+            m_rings.removeAt(i);
+        }
+    }
+
+    // 更新分数弹出
+    for (int i = m_popups.size() - 1; i >= 0; --i) {
+        m_popups[i].age += static_cast<int>(dt);
+        if (m_popups[i].age >= m_popups[i].maxAge) {
+            m_popups.removeAt(i);
+        }
+    }
 }

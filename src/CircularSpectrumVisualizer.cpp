@@ -89,10 +89,10 @@ void CircularSpectrumVisualizer::paintEvent(QPaintEvent* event)
     // 中心文字（可选装饰）
     painter.setPen(QColor(0, 255, 136, 150));
     QFont font = painter.font();
-    font.setPixelSize(static_cast<int>(innerRadius * 0.4));
+    font.setPixelSize(static_cast<int>(innerRadius * 0.22));
     font.setBold(true);
     painter.setFont(font);
     painter.drawText(QRectF(center.x() - innerRadius, center.y() - innerRadius,
                             innerRadius * 2, innerRadius * 2),
-                     Qt::AlignCenter, QStringLiteral("RHYTHM"));
+                     Qt::AlignCenter, QStringLiteral("SpectrumFall"));
 }

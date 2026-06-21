@@ -13,6 +13,35 @@ class QPushButton;
 class QSlider;
 class QLabel;
 
+/// 命中特效粒子
+struct HitParticle {
+    qreal x, y;
+    qreal vx, vy;
+    QColor color;
+    int age;
+    int maxAge;
+    qreal size;
+};
+
+/// 命中反馈环
+struct HitRing {
+    qreal x, y;
+    QColor color;
+    int age;
+    int maxAge;
+    qreal startRadius;
+    qreal endRadius;
+};
+
+/// 分数弹出动画
+struct ScorePopup {
+    QString text;
+    QColor color;
+    qreal x, y;
+    int age;
+    int maxAge;
+};
+
 /// 游戏页面：4 轨道下落式音符，判定线，键盘输入 D/F/J/K，判定文字动画
 class GameWidget : public QWidget
 {
@@ -79,6 +108,17 @@ private:
     qreal m_noteSpeed;                 ///< 音符下落速度（像素/毫秒）
     qreal m_trackWidth;                ///< 轨道宽度
 
+    // ── 炫酷效果 ──
+    QVector<QPointF> m_stars;          ///< 预生成的星光位置
+    QVector<float> m_starPhases;       ///< 星光闪烁相位
+    QVector<HitParticle> m_particles;  ///< 命中粒子
+    QVector<HitRing> m_rings;          ///< 命中反馈环
+    QVector<ScorePopup> m_popups;      ///< 分数弹出
+    qreal m_judgeLinePulse;            ///< 判定线脉冲强度（0-1，命中时跳到1然后衰减）
+    qreal m_comboScale;                ///< Combo 文字缩放动画
+    int m_lastCombo;                   ///< 上一帧的 combo 值（用于检测变化）
+    qint64 m_lastFrameTime;            ///< 上一帧时间戳
+
     // 暂停菜单
     QWidget* m_pauseOverlay;           ///< 暂停遮罩
     QPushButton* m_continueBtn;        ///< 继续游戏按钮
@@ -102,4 +142,13 @@ private:
 
     /// 获取轨道 X 坐标
     qreal laneX(int lane) const;
+
+    /// 生成命中特效（粒子+环+脉冲）
+    void spawnHitEffect(int lane, int judgment);
+
+    /// 更新粒子/环/动画状态
+    void updateEffects(qint64 deltaTimeMs);
+
+    /// 生成星光
+    void generateStars();
 };
