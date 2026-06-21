@@ -10,6 +10,8 @@
 class AudioEngine;
 class ScoreManager;
 class QPushButton;
+class QSlider;
+class QLabel;
 
 /// 游戏页面：4 轨道下落式音符，判定线，键盘输入 D/F/J/K，判定文字动画
 class GameWidget : public QWidget
@@ -31,6 +33,7 @@ public:
 signals:
     void gameFinished();
     void backRequested();
+    void restartRequested();  ///< 请求 MainWindow 重新开始当前歌曲
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -44,13 +47,20 @@ private slots:
 private:
     void setupPauseOverlay();          ///< 创建暂停菜单遮罩
 
+    /// 根据当前密度设置过滤音符列表
+    void applyDensityFilter();
+
     AudioEngine* m_audioEngine;        ///< 音频引擎
     ScoreManager* m_scoreManager;      ///< 分数管理器
     QTimer* m_renderTimer;             ///< 渲染定时器
-    QVector<GameNote> m_notes;         ///< 游戏音符列表
+    QVector<GameNote> m_notes;         ///< 当前游戏音符列表（可能已过滤）
+    QVector<GameNote> m_allNotes;      ///< 原始完整音符列表（未过滤）
     QMap<int, bool> m_keyPressed;      ///< 按键状态
     bool m_paused;                     ///< 是否暂停
     bool m_gameActive;                 ///< 游戏是否活跃
+    int m_minGapMs;                    ///< 同轨道音符最小间隔（毫秒）
+    int m_globalMinGapMs;              ///< 跨轨道全局最小间隔（毫秒）
+    bool m_densityChanged;             ///< 密度是否被修改过
 
     // 精确计时
     QElapsedTimer m_gameClock;         ///< 游戏高精度时钟
@@ -73,6 +83,10 @@ private:
     QWidget* m_pauseOverlay;           ///< 暂停遮罩
     QPushButton* m_continueBtn;        ///< 继续游戏按钮
     QPushButton* m_backToMenuBtn;      ///< 返回主菜单按钮
+    QSlider* m_densitySlider;          ///< 同轨道密度滑块
+    QLabel* m_densityLabel;            ///< 同轨道密度值显示
+    QSlider* m_globalGapSlider;        ///< 跨轨道全局间隔滑块
+    QLabel* m_globalGapLabel;          ///< 跨轨道全局间隔值显示
 
     /// 获取精确的当前游戏时间（毫秒），基于高精度时钟
     qint64 getGameTime() const;

@@ -5,7 +5,7 @@
 #include <QtMultimedia/QMediaPlayer>
 #include <QtMultimedia/QAudioOutput>
 
-/// 音频引擎：QMediaPlayer 负责播放，手写 WAV/MP3 解析器获取 PCM 数据
+/// 音频引擎：QMediaPlayer 负责播放，手写 WAV/MP3/FLAC 解析器获取 PCM 数据
 class AudioEngine : public QObject
 {
     Q_OBJECT
@@ -14,7 +14,7 @@ public:
     explicit AudioEngine(QObject* parent = nullptr);
     ~AudioEngine();
 
-    /// 加载音频文件（WAV / MP3 格式），同时解析 PCM 和设置播放器
+    /// 加载音频文件（WAV / MP3 / FLAC 格式），同时解析 PCM 和设置播放器
     bool loadFile(const QString& path);
 
     /// 播放
@@ -82,4 +82,7 @@ private:
 
     /// MP3 解码器（基于 dr_mp3）
     bool parseMp3(const QString& path);
+
+    /// FLAC 解码器（基于 dr_flac）
+    bool parseFlac(const QString& path);
 };

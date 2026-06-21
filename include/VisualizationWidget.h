@@ -58,10 +58,13 @@ private:
     QPushButton* m_backBtn;                  ///< 返回按钮
     QSlider* m_positionSlider;               ///< 进度滑块
     QSlider* m_volumeSlider;                 ///< 音量滑块
+    QSlider* m_compressionSlider;            ///< 频谱压缩强度滑块
+    QLabel* m_compressionLabel;              ///< 压缩强度值显示
     QComboBox* m_fftSizeCombo;               ///< FFT 窗口大小选择
     QComboBox* m_visModeCombo;               ///< 可视化模式选择
     QLabel* m_timeLabel;                     ///< 时间显示标签
     QTimer* m_renderTimer;                   ///< 渲染定时器（60Hz）
     qint64 m_durationMs;                     ///< 音频总时长
+    float m_compressionPower;                ///< 频谱压缩强度（0.05-1.0）
     bool m_seeking;                          ///< 是否正在拖动进度条
 };

@@ -6,7 +6,11 @@
 #include <QPaintEvent>
 #include <QKeyEvent>
 #include <QPushButton>
+#include <QSlider>
+#include <QLabel>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFrame>
 #include <QApplication>
 #include <cmath>
 
@@ -15,6 +19,16 @@ static constexpr qreal SCROLL_SPEED = 0.35;     // 像素/毫秒（下落速度�
 static constexpr qint64 VISIBLE_AHEAD = 3000;   // 提前 3 秒显示音符
 static constexpr qint64 MISS_THRESHOLD = 300;   // 超过 300ms 视为 Miss（音符过了判定线后的容许窗口）
 static constexpr int LANE_COUNT = 4;
+static constexpr int DEFAULT_MIN_GAP_MS = 900;   // 默认同轨道最小间隔 900ms
+static constexpr int MIN_GAP_MS = 150;          // 同轨道滑块最小值
+static constexpr int MAX_GAP_MS = 1000;         // 同轨道滑块最大值
+static constexpr int GAP_STEP_MS = 50;          // 滑块步进
+
+// 跨轨道全局间隔（防止不同轨道音符挤成一团）
+static constexpr int DEFAULT_GLOBAL_MIN_GAP_MS = 300;  // 默认跨轨道最小间隔 300ms
+static constexpr int GLOBAL_MIN_GAP_MS = 100;          // 全局滑块最小值
+static constexpr int GLOBAL_MAX_GAP_MS = 800;          // 全局滑块最大值
+static constexpr int GLOBAL_GAP_STEP_MS = 50;          // 全局滑块步进
 
 GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWidget* parent)
     : QWidget(parent)
@@ -23,6 +37,9 @@ GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWi
     , m_renderTimer(new QTimer(this))
     , m_paused(false)
     , m_gameActive(false)
+    , m_minGapMs(DEFAULT_MIN_GAP_MS)
+    , m_globalMinGapMs(DEFAULT_GLOBAL_MIN_GAP_MS)
+    , m_densityChanged(false)
     , m_judgeTextTimer(0)
     , m_judgeLineY(0.85)
     , m_noteSpeed(SCROLL_SPEED)
@@ -56,30 +73,185 @@ void GameWidget::setupPauseOverlay()
     // 全屏半透明遮罩
     m_pauseOverlay = new QWidget(this);
     m_pauseOverlay->setGeometry(0, 0, width(), height());
-    m_pauseOverlay->setStyleSheet("background-color: rgba(10, 10, 30, 200);");
+    m_pauseOverlay->setStyleSheet("background-color: rgba(10, 10, 30, 220);");
     m_pauseOverlay->hide();
 
-    // 居中按钮容器
-    QVBoxLayout* layout = new QVBoxLayout(m_pauseOverlay);
-    layout->setAlignment(Qt::AlignCenter);
-    layout->setSpacing(20);
+    // 主布局：垂直居中
+    QVBoxLayout* mainLayout = new QVBoxLayout(m_pauseOverlay);
+    mainLayout->setAlignment(Qt::AlignCenter);
+    mainLayout->setSpacing(16);
+
+    // ── 密度调节区域 ──
+    QWidget* densityPanel = new QWidget(m_pauseOverlay);
+    densityPanel->setObjectName("controlPanel");
+    QVBoxLayout* densityLayout = new QVBoxLayout(densityPanel);
+    densityLayout->setAlignment(Qt::AlignCenter);
+    densityLayout->setSpacing(8);
+
+    // 标题
+    QLabel* densityTitle = new QLabel(QStringLiteral("音符密度调节"), densityPanel);
+    densityTitle->setAlignment(Qt::AlignCenter);
+    densityTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #00ff88; background: transparent;");
+    densityLayout->addWidget(densityTitle);
+
+    // 副标题
+    QLabel* densityHint = new QLabel(QStringLiteral("调整后点击「继续游戏」将从头开始"), densityPanel);
+    densityHint->setAlignment(Qt::AlignCenter);
+    densityHint->setStyleSheet("font-size: 12px; color: #8888aa; background: transparent;");
+    densityLayout->addWidget(densityHint);
+
+    // ── 滑块 1: 同轨道间隔 ──
+    QLabel* laneGapTitle = new QLabel(QStringLiteral("同轨道最小间隔"), densityPanel);
+    laneGapTitle->setAlignment(Qt::AlignCenter);
+    laneGapTitle->setStyleSheet("font-size: 13px; color: #bd93f9; background: transparent;");
+    densityLayout->addWidget(laneGapTitle);
+
+    // 滑块行
+    QHBoxLayout* sliderRow = new QHBoxLayout();
+    sliderRow->setSpacing(10);
+
+    QLabel* sparseLabel = new QLabel(QStringLiteral("密集"), densityPanel);
+    sparseLabel->setStyleSheet("font-size: 13px; color: #bd93f9; background: transparent;");
+    sliderRow->addWidget(sparseLabel);
+
+    m_densitySlider = new QSlider(Qt::Horizontal, densityPanel);
+    m_densitySlider->setMinimum(MIN_GAP_MS);
+    m_densitySlider->setMaximum(MAX_GAP_MS);
+    m_densitySlider->setSingleStep(GAP_STEP_MS);
+    m_densitySlider->setPageStep(GAP_STEP_MS * 2);
+    m_densitySlider->setValue(m_minGapMs);
+    m_densitySlider->setMinimumWidth(200);
+    m_densitySlider->setObjectName("densitySlider");
+    sliderRow->addWidget(m_densitySlider);
+
+    QLabel* wideLabel = new QLabel(QStringLiteral("稀疏"), densityPanel);
+    wideLabel->setStyleSheet("font-size: 13px; color: #bd93f9; background: transparent;");
+    sliderRow->addWidget(wideLabel);
+
+    densityLayout->addLayout(sliderRow);
+
+    // 数值显示
+    m_densityLabel = new QLabel(QStringLiteral("%1ms").arg(m_minGapMs), densityPanel);
+    m_densityLabel->setAlignment(Qt::AlignCenter);
+    m_densityLabel->setStyleSheet("font-size: 14px; color: #e0e0e0; background: transparent;");
+    densityLayout->addWidget(m_densityLabel);
+
+    // 分隔线
+    QFrame* separator = new QFrame(densityPanel);
+    separator->setFrameShape(QFrame::HLine);
+    separator->setStyleSheet("color: #0f3460; background-color: #0f3460; max-height: 1px;");
+    densityLayout->addWidget(separator);
+
+    // ── 滑块 2: 跨轨道全局间隔 ──
+    QLabel* globalGapTitle = new QLabel(QStringLiteral("跨轨道最小间隔"), densityPanel);
+    globalGapTitle->setAlignment(Qt::AlignCenter);
+    globalGapTitle->setStyleSheet("font-size: 13px; color: #8be9fd; background: transparent;");
+    densityLayout->addWidget(globalGapTitle);
+
+    // 全局滑块行
+    QHBoxLayout* globalSliderRow = new QHBoxLayout();
+    globalSliderRow->setSpacing(10);
+
+    QLabel* gSparseLabel = new QLabel(QStringLiteral("密集"), densityPanel);
+    gSparseLabel->setStyleSheet("font-size: 13px; color: #8be9fd; background: transparent;");
+    globalSliderRow->addWidget(gSparseLabel);
+
+    m_globalGapSlider = new QSlider(Qt::Horizontal, densityPanel);
+    m_globalGapSlider->setMinimum(GLOBAL_MIN_GAP_MS);
+    m_globalGapSlider->setMaximum(GLOBAL_MAX_GAP_MS);
+    m_globalGapSlider->setSingleStep(GLOBAL_GAP_STEP_MS);
+    m_globalGapSlider->setPageStep(GLOBAL_GAP_STEP_MS * 2);
+    m_globalGapSlider->setValue(m_globalMinGapMs);
+    m_globalGapSlider->setMinimumWidth(200);
+    m_globalGapSlider->setObjectName("globalGapSlider");
+    globalSliderRow->addWidget(m_globalGapSlider);
+
+    QLabel* gWideLabel = new QLabel(QStringLiteral("稀疏"), densityPanel);
+    gWideLabel->setStyleSheet("font-size: 13px; color: #8be9fd; background: transparent;");
+    globalSliderRow->addWidget(gWideLabel);
+
+    densityLayout->addLayout(globalSliderRow);
+
+    // 全局数值显示
+    m_globalGapLabel = new QLabel(QStringLiteral("%1ms").arg(m_globalMinGapMs), densityPanel);
+    m_globalGapLabel->setAlignment(Qt::AlignCenter);
+    m_globalGapLabel->setStyleSheet("font-size: 14px; color: #e0e0e0; background: transparent;");
+    densityLayout->addWidget(m_globalGapLabel);
+
+    mainLayout->addWidget(densityPanel);
+
+    // 同轨道滑块变化事件
+    connect(m_densitySlider, &QSlider::valueChanged, this, [this](int value) {
+        m_densityLabel->setText(QStringLiteral("%1ms").arg(value));
+        m_densityChanged = true;
+    });
+
+    // 全局滑块变化事件
+    connect(m_globalGapSlider, &QSlider::valueChanged, this, [this](int value) {
+        m_globalGapLabel->setText(QStringLiteral("%1ms").arg(value));
+        m_densityChanged = true;
+    });
+
+    // ── 按钮区域 ──
+    QVBoxLayout* btnLayout = new QVBoxLayout();
+    btnLayout->setAlignment(Qt::AlignCenter);
+    btnLayout->setSpacing(12);
 
     // "继续游戏" 按钮
     m_continueBtn = new QPushButton(QStringLiteral("继续游戏"), m_pauseOverlay);
     m_continueBtn->setMinimumSize(200, 50);
     m_continueBtn->setObjectName("menuButton");
-    layout->addWidget(m_continueBtn);
+    btnLayout->addWidget(m_continueBtn);
 
     // "返回主菜单" 按钮
     m_backToMenuBtn = new QPushButton(QStringLiteral("返回主菜单"), m_pauseOverlay);
     m_backToMenuBtn->setMinimumSize(200, 50);
     m_backToMenuBtn->setObjectName("actionButton");
-    layout->addWidget(m_backToMenuBtn);
+    btnLayout->addWidget(m_backToMenuBtn);
 
+    mainLayout->addLayout(btnLayout);
+
+    // 继续游戏
     connect(m_continueBtn, &QPushButton::clicked, this, [this]() {
-        resumeGame();
-        m_pauseOverlay->hide();
+        int newLaneGap = m_densitySlider->value();
+        int newGlobalGap = m_globalGapSlider->value();
+
+        if (m_densityChanged) {
+            // 密度被修改 → 重新过滤音符并重新开始
+            m_minGapMs = newLaneGap;
+            m_globalMinGapMs = newGlobalGap;
+            applyDensityFilter();
+            m_densityChanged = false;
+
+            // 重新开始当前歌曲（保留密度设置）
+            m_paused = false;
+            m_gameActive = true;
+            m_judgeTextTimer = 0;
+            m_judgeText.clear();
+            m_startPosMs = 0;
+            m_pauseElapsedMs = 0;
+            m_totalPausedMs = 0;
+
+            if (m_scoreManager) {
+                m_scoreManager->reset();
+            }
+
+            m_gameClock.restart();
+            m_pauseOverlay->hide();
+            setFocus();
+
+            if (m_audioEngine) {
+                m_audioEngine->seek(0);
+                m_audioEngine->play();
+            }
+        } else {
+            // 密度未修改 → 正常恢复
+            resumeGame();
+            m_pauseOverlay->hide();
+        }
     });
+
+    // 返回主菜单
     connect(m_backToMenuBtn, &QPushButton::clicked, this, [this]() {
         m_gameActive = false;
         m_renderTimer->stop();
@@ -89,9 +261,62 @@ void GameWidget::setupPauseOverlay()
     });
 }
 
+void GameWidget::applyDensityFilter()
+{
+    // 从原始音符列表中，按双重间隔过滤：
+    // 1) 同轨道最小间隔 m_minGapMs —— 防止同一轨道连打太快
+    // 2) 跨轨道全局最小间隔 m_globalMinGapMs —— 防止不同轨道音符挤成一团
+    m_notes.clear();
+
+    // 每个轨道独立追踪最近时间戳
+    qint64 lastTimestampPerLane[4] = {-m_minGapMs, -m_minGapMs, -m_minGapMs, -m_minGapMs};
+    // 全局最近时间戳（任何轨道产生音符后都更新）
+    qint64 lastGlobalTimestamp = -m_globalMinGapMs;
+
+    for (const GameNote& note : m_allNotes) {
+        int lane = note.lane;
+        if (lane < 0 || lane > 3) lane = 0;
+
+        // 检查 1: 同轨道间隔
+        if (note.timestampMs - lastTimestampPerLane[lane] < m_minGapMs) {
+            continue;
+        }
+
+        // 检查 2: 跨轨道全局间隔
+        if (note.timestampMs - lastGlobalTimestamp < m_globalMinGapMs) {
+            continue;
+        }
+
+        m_notes.append(note);
+        lastTimestampPerLane[lane] = note.timestampMs;
+        lastGlobalTimestamp = note.timestampMs;
+    }
+}
+
 void GameWidget::startGame(const QVector<GameNote>& notes)
 {
-    m_notes = notes;
+    m_allNotes = notes;  // 保存原始完整音符列表
+    m_minGapMs = DEFAULT_MIN_GAP_MS;
+    m_globalMinGapMs = DEFAULT_GLOBAL_MIN_GAP_MS;
+    m_densityChanged = false;
+
+    // 重置滑块到默认值
+    if (m_densitySlider) {
+        m_densitySlider->setValue(DEFAULT_MIN_GAP_MS);
+    }
+    if (m_densityLabel) {
+        m_densityLabel->setText(QStringLiteral("%1ms").arg(DEFAULT_MIN_GAP_MS));
+    }
+    if (m_globalGapSlider) {
+        m_globalGapSlider->setValue(DEFAULT_GLOBAL_MIN_GAP_MS);
+    }
+    if (m_globalGapLabel) {
+        m_globalGapLabel->setText(QStringLiteral("%1ms").arg(DEFAULT_GLOBAL_MIN_GAP_MS));
+    }
+
+    // 应用密度过滤
+    applyDensityFilter();
+
     m_paused = false;
     m_gameActive = true;
     m_judgeTextTimer = 0;
@@ -303,7 +528,7 @@ void GameWidget::paintEvent(QPaintEvent* event)
                          QStringLiteral("%1 Combo").arg(combo));
     }
 
-    // 底部按键提示
+    // 底部按键提示 + 当前密度
     hudFont.setPixelSize(14);
     hudFont.setBold(false);
     painter.setFont(hudFont);
@@ -313,6 +538,13 @@ void GameWidget::paintEvent(QPaintEvent* event)
         qreal x = startX + i * m_trackWidth;
         painter.drawText(QRectF(x, h - 25, m_trackWidth, 20), Qt::AlignCenter, keys[i]);
     }
+
+    // 右下角显示当前密度
+    painter.setPen(QColor(80, 80, 120));
+    hudFont.setPixelSize(12);
+    painter.setFont(hudFont);
+    painter.drawText(w - 220, h - 10, QStringLiteral("同轨: %1ms | 跨轨: %2ms | ESC 暂停")
+                     .arg(m_minGapMs).arg(m_globalMinGapMs));
 }
 
 void GameWidget::keyPressEvent(QKeyEvent* event)

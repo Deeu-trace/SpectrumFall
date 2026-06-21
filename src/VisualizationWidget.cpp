@@ -1,6 +1,7 @@
 #include "VisualizationWidget.h"
 #include "AudioEngine.h"
 #include "FFTAnalyzer.h"
+#include "SpectrumProcessor.h"
 #include "BarSpectrumVisualizer.h"
 #include "CircularSpectrumVisualizer.h"
 #include "WaveformVisualizer.h"
@@ -20,6 +21,7 @@ VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* pare
     , m_audioEngine(audioEngine)
     , m_fftAnalyzer(2048)
     , m_durationMs(0)
+    , m_compressionPower(0.33f)
     , m_seeking(false)
 {
     QVBoxLayout* layout = new QVBoxLayout(this);
@@ -101,6 +103,28 @@ VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* pare
     m_visModeCombo->setFixedWidth(100);
     btnLayout->addWidget(m_visModeCombo);
 
+    // ── 压缩强度滑块 ──
+    QLabel* compLabel = new QLabel(QStringLiteral("压缩"), this);
+    compLabel->setStyleSheet("color: #aaaaaa; background: transparent; font-size: 12px;");
+    btnLayout->addWidget(compLabel);
+
+    m_compressionSlider = new QSlider(Qt::Horizontal, this);
+    m_compressionSlider->setRange(5, 100);       // 0.05 ~ 1.00
+    m_compressionSlider->setValue(static_cast<int>(m_compressionPower * 100));
+    m_compressionSlider->setFixedWidth(80);
+    m_compressionSlider->setObjectName("densitySlider");
+    btnLayout->addWidget(m_compressionSlider);
+
+    m_compressionLabel = new QLabel(QStringLiteral(".33"), this);
+    m_compressionLabel->setMinimumWidth(30);
+    m_compressionLabel->setStyleSheet("color: #e0e0e0; background: transparent; font-size: 12px;");
+    btnLayout->addWidget(m_compressionLabel);
+
+    connect(m_compressionSlider, &QSlider::valueChanged, this, [this](int value) {
+        m_compressionPower = value / 100.0f;
+        m_compressionLabel->setText(QStringLiteral(".%1").arg(value));
+    });
+
     btnLayout->addStretch();
 
     m_backBtn = new QPushButton(QStringLiteral("返回"), this);
@@ -163,21 +187,25 @@ void VisualizationWidget::onRenderTick()
     QVector<float> magnitude;
     m_fftAnalyzer.compute(window, magnitude);
 
+    // 频谱后处理：对数频率轴 + 频带均值 + 可调压缩强度
+    QVector<float> processed = SpectrumProcessor::process(
+        magnitude, m_audioEngine->sampleRate(), fftSize, 256, m_compressionPower);
+
     // 分发到当前活跃的可视化组件
     int visIndex = m_visStack->currentIndex();
 
     if (visIndex == 0) {
         // 柱状频谱
-        m_barWidget->setSpectrumData(magnitude);
+        m_barWidget->setSpectrumData(processed);
     } else if (visIndex == 1) {
         // 圆形频谱
-        m_circularWidget->setSpectrumData(magnitude);
+        m_circularWidget->setSpectrumData(processed);
     } else if (visIndex == 2) {
         // 波形
         m_waveformWidget->setWaveformData(window);
     } else if (visIndex == 3) {
         // 瀑布图
-        m_waterfallWidget->setSpectrumData(magnitude);
+        m_waterfallWidget->setSpectrumData(processed);
     }
 }
 

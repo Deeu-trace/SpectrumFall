@@ -87,9 +87,8 @@ private:
     float m_analyzedBpm;                 ///< 异步分析出的 BPM
     QString m_errorMessage;              ///< 后台线程写入的错误信息
 
-    // 分析超时与取消
+    // 分析超时
     QTimer* m_analysisTimer;             ///< 90s 超时定时器
-    volatile bool* m_cancelAnalysis;     ///< 分析取消标志（堆分配）
     bool m_analysisActive;               ///< 分析是否正在进行
 
     // ── 跨线程信号（供后台分析 lambda 通过 QueuedConnection 安全更新 UI）──

@@ -11,6 +11,11 @@
 #define DR_MP3_NO_STDIO
 #include "dr_mp3.h"
 
+// dr_flac 实现（只在一个 .cpp 中定义）
+#define DR_FLAC_IMPLEMENTATION
+#define DR_FLAC_NO_STDIO
+#include "dr_flac.h"
+
 AudioEngine::AudioEngine(QObject* parent)
     : QObject(parent)
     , m_player(new QMediaPlayer(this))
@@ -55,9 +60,7 @@ bool AudioEngine::loadFile(const QString& path)
     } else if (path.endsWith(".wav", Qt::CaseInsensitive)) {
         success = parseWav(path);
     } else if (path.endsWith(".flac", Qt::CaseInsensitive)) {
-        qWarning() << "AudioEngine: FLAC format is not supported for PCM analysis:" << path;
-        emit loadComplete(false);
-        return false;
+        success = parseFlac(path);
     } else {
         qWarning() << "AudioEngine: unsupported audio format:" << path;
         emit loadComplete(false);
@@ -465,6 +468,62 @@ bool AudioEngine::parseMp3(const QString& path)
     m_durationMs = static_cast<qint64>(totalFrames) * 1000 / m_sampleRate;
 
     qDebug() << "AudioEngine: loaded MP3" << path
+             << m_sampleRate << "Hz" << m_channels << "ch"
+             << "duration:" << m_durationMs << "ms"
+             << "frames:" << totalFrames;
+
+    return true;
+}
+
+bool AudioEngine::parseFlac(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "AudioEngine: cannot open FLAC file:" << path;
+        return false;
+    }
+
+    QByteArray fileData = file.readAll();
+    if (fileData.isEmpty()) {
+        qWarning() << "AudioEngine: FLAC file is empty:" << path;
+        return false;
+    }
+
+    // dr_flac 解码
+    unsigned int channels = 0;
+    unsigned int sampleRate = 0;
+    drflac_uint64 totalFrames = 0;
+
+    float* pPCM = drflac_open_memory_and_read_pcm_frames_f32(
+        fileData.constData(), static_cast<size_t>(fileData.size()),
+        &channels, &sampleRate, &totalFrames, nullptr);
+
+    if (!pPCM || totalFrames == 0) {
+        qWarning() << "AudioEngine: failed to decode FLAC:" << path;
+        if (pPCM) drflac_free(pPCM, nullptr);
+        return false;
+    }
+
+    m_sampleRate = static_cast<int>(sampleRate);
+    m_channels = static_cast<int>(channels);
+    m_bitsPerSample = 32; // dr_flac 输出 32-bit float
+
+    // dr_flac 输出交错 float（多声道），转为单声道均值
+    m_pcmBuffer.resize(static_cast<int>(totalFrames));
+    for (drflac_uint64 i = 0; i < totalFrames; ++i) {
+        float sample = 0.0f;
+        for (int ch = 0; ch < m_channels; ++ch) {
+            sample += pPCM[i * m_channels + ch];
+        }
+        m_pcmBuffer[static_cast<int>(i)] = sample / m_channels;
+    }
+
+    drflac_free(pPCM, nullptr);
+
+    // 计算总时长
+    m_durationMs = static_cast<qint64>(totalFrames) * 1000 / m_sampleRate;
+
+    qDebug() << "AudioEngine: loaded FLAC" << path
              << m_sampleRate << "Hz" << m_channels << "ch"
              << "duration:" << m_durationMs << "ms"
              << "frames:" << totalFrames;

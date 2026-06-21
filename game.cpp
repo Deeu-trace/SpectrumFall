@@ -32,7 +32,6 @@ MainWindow::MainWindow(QWidget* parent)
     , m_loadSuccess(false)
     , m_analyzedBpm(0.0f)
     , m_analysisTimer(new QTimer(this))
-    , m_cancelAnalysis(new volatile bool(false))
     , m_analysisActive(false)
 {
     setupUI();
@@ -48,15 +47,14 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow()
 {
-    *m_cancelAnalysis = true;
+    m_beatDetector->requestCancel();
     m_analysisTimer->stop();
     delete m_noteGenerator;
-    delete m_cancelAnalysis;
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    *m_cancelAnalysis = true;
+    m_beatDetector->requestCancel();
     m_analysisTimer->stop();
     QMainWindow::closeEvent(event);
 }
@@ -145,6 +143,13 @@ void MainWindow::connectSignals()
             m_songSelectPage, &SongSelectWidget::setAnalysisProgress);
     connect(this, &MainWindow::durationUpdated,
             m_songSelectPage, &SongSelectWidget::setDurationDisplay);
+
+    // BeatDetector 进度信号（0-100 映射到 30-85）
+    connect(m_beatDetector, &BeatDetector::progressChanged,
+            this, [this](int percent) {
+                int overall = 30 + percent * 55 / 100;
+                emit analysisProgressChanged(overall);
+            });
 }
 
 void MainWindow::navigateTo(int pageIndex)
@@ -169,11 +174,10 @@ void MainWindow::onAnalyzeRequested(const QString& path)
     m_analyzedBpm = 0.0f;
     m_errorMessage.clear();
     m_pendingNotes.clear();
-    *m_cancelAnalysis = false;
     m_analysisActive = true;
 
     // 启动 90 秒超时定时器
-    m_analysisTimer->start(90000);
+    m_analysisTimer->start(300000);
 
     AudioEngine* engine = m_audioEngine;
     BeatDetector* detector = m_beatDetector;
@@ -186,15 +190,11 @@ void MainWindow::onAnalyzeRequested(const QString& path)
         m_loadSuccess = engine->loadFile(path);
 
         if (!m_loadSuccess) {
-            if (path.endsWith(".flac", Qt::CaseInsensitive)) {
-                m_errorMessage = QStringLiteral("FLAC 格式暂不支持节拍分析，请选择 MP3 或 WAV 文件");
-            } else {
-                m_errorMessage = QStringLiteral("无法加载音频文件，请检查文件是否损坏或格式不受支持");
-            }
+            m_errorMessage = QStringLiteral("无法加载音频文件，请检查文件是否损坏或格式不受支持");
             return;
         }
 
-        if (*m_cancelAnalysis) return;
+        if (detector->isCancelled()) return;
 
         // 更新时长 + 进度
         emit durationUpdated(engine->duration());
@@ -207,19 +207,14 @@ void MainWindow::onAnalyzeRequested(const QString& path)
             return;
         }
 
-        if (*m_cancelAnalysis) return;
+        if (detector->isCancelled()) return;
 
         // ── Phase 2: 节拍检测（30% → 85%）──
+        // 进度由 BeatDetector::progressChanged 信号报告（已在 connectSignals 中连接）
         const QVector<float>& pcm = engine->pcmData();
+        detector->analyze(pcm, engine->sampleRate());
 
-        auto progressCb = [this](int percent) {
-            int overall = 30 + percent * 55 / 100;
-            emit analysisProgressChanged(overall);
-        };
-
-        detector->analyze(pcm, engine->sampleRate(), progressCb, m_cancelAnalysis);
-
-        if (*m_cancelAnalysis) return;
+        if (detector->isCancelled()) return;
 
         emit analysisProgressChanged(90);
 
@@ -243,7 +238,7 @@ void MainWindow::onAnalyzeFinished()
     m_analysisTimer->stop();
     m_analysisActive = false;
 
-    if (*m_cancelAnalysis) {
+    if (m_beatDetector->isCancelled()) {
         // 被取消（用户返回或超时后取消），不更新 UI
         return;
     }
@@ -271,7 +266,7 @@ void MainWindow::onAnalyzeFinished()
 
 void MainWindow::onAnalysisTimeout()
 {
-    *m_cancelAnalysis = true;
+    m_beatDetector->requestCancel();
     m_analysisActive = false;
     m_songSelectPage->showAnalysisError(
         QStringLiteral("分析超时（90 秒），请尝试其他歌曲或更短的音频"));
@@ -280,7 +275,7 @@ void MainWindow::onAnalysisTimeout()
 void MainWindow::cancelAnalysis()
 {
     if (m_analysisActive) {
-        *m_cancelAnalysis = true;
+        m_beatDetector->requestCancel();
         m_analysisTimer->stop();
         // 不等后台线程结束，onAnalyzeFinished 会检测 cancelFlag 并跳过 UI 更新
     }

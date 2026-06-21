@@ -22,31 +22,38 @@ BeatDetector::BeatDetector(QObject* parent)
     , m_bpm(0.0f)
     , m_fftSize(1024)    // 节拍检测用 1024 即可，速度比 2048 快 ~2x
     , m_hopSize(1024)    // 帧移 = fftSize，无重叠，总帧数减少 ~2x
+    , m_cancelled(false)
     , m_hysteresisCount{0, 0, 0, 0}
+    , m_lastDoubleBeatIndex(-1)
 {
 }
 
-void BeatDetector::analyze(const QVector<float>& pcm, int sampleRate,
-                           std::function<void(int)> progressCallback,
-                           volatile bool* cancelFlag)
+void BeatDetector::requestCancel()
+{
+    m_cancelled = true;
+}
+
+void BeatDetector::analyze(const QVector<float>& pcm, int sampleRate)
 {
     m_beatPoints.clear();
     m_bpm = 0.0f;
+    m_cancelled = false;
+
     // 重置迟滞状态
     for (int i = 0; i < NUM_LANES; ++i) {
         m_hysteresisCount[i] = 0;
     }
+    m_lastDoubleBeatIndex = -1;
 
     if (pcm.isEmpty() || sampleRate <= 0) {
         return;
     }
 
     // 1. 计算 Spectral Flux，同时缓存每帧幅度谱用于后续轨道分配
-    QVector<QVector<float>> magnitudeCache;
-    QVector<float> flux = computeSpectralFlux(pcm, sampleRate, magnitudeCache,
-                                              progressCallback, cancelFlag);
+    MagnitudeCache magnitudeCache;
+    QVector<float> flux = computeSpectralFlux(pcm, sampleRate, magnitudeCache);
 
-    if (flux.isEmpty() || (cancelFlag && *cancelFlag)) {
+    if (flux.isEmpty() || m_cancelled) {
         return;
     }
 
@@ -75,12 +82,13 @@ void BeatDetector::analyze(const QVector<float>& pcm, int sampleRate,
 
     // 4. 将峰值帧索引转换为毫秒时间戳，用缓存的幅度谱分配轨道
     //    assignLanes 返回 1~2 个轨道，每个轨道生成一个 BeatPoint
-    for (int frameIdx : filteredPeaks) {
+    for (int beatIdx = 0; beatIdx < filteredPeaks.size(); ++beatIdx) {
+        int frameIdx = filteredPeaks[beatIdx];
         qint64 timestampMs = static_cast<qint64>(frameIdx) * m_hopSize * 1000 / sampleRate;
 
         QVector<int> lanes;
         if (frameIdx < magnitudeCache.size() && !magnitudeCache[frameIdx].isEmpty()) {
-            lanes = assignLanes(magnitudeCache[frameIdx], m_fftSize, sampleRate);
+            lanes = assignLanes(magnitudeCache[frameIdx], m_fftSize, sampleRate, beatIdx);
         } else {
             lanes.append(0);
         }
@@ -145,7 +153,7 @@ float BeatDetector::bandEnergy(const QVector<float>& magnitude, int binStart, in
     return energy;
 }
 
-QVector<int> BeatDetector::assignLanes(const QVector<float>& magnitude, int fftSize, int sampleRate)
+QVector<int> BeatDetector::assignLanes(const QVector<float>& magnitude, int fftSize, int sampleRate, int beatIndex)
 {
     QVector<int> result;
     if (magnitude.isEmpty()) {
@@ -188,20 +196,16 @@ QVector<int> BeatDetector::assignLanes(const QVector<float>& magnitude, int fftS
         finalEnergy[i] = compensated[i] * hysteresisFactor[i];
     }
 
-    // 4. 按最终能量排序，取 Top 2（双押限制）
-    //    构建索引数组
+    // 4. 按最终能量排序（降序）
     int indices[NUM_LANES] = {0, 1, 2, 3};
-    // 降序排序：能量高的排前面
     std::sort(indices, indices + NUM_LANES, [&finalEnergy](int a, int b) {
         return finalEnergy[a] > finalEnergy[b];
     });
 
-    // 取能量最高的轨道（必须大于 0 才分配）
-    for (int k = 0; k < 2 && k < NUM_LANES; ++k) {
-        int lane = indices[k];
-        if (finalEnergy[lane] > 0.0f) {
-            result.append(lane);
-        }
+    // 5. 取能量最高的轨道（单键，必须 > 0）
+    int topLane = indices[0];
+    if (finalEnergy[topLane] > 0.0f) {
+        result.append(topLane);
     }
 
     // 安全兜底：如果没有任何轨道有能量，分配 D 轨
@@ -209,7 +213,38 @@ QVector<int> BeatDetector::assignLanes(const QVector<float>& magnitude, int fftS
         result.append(0);
     }
 
-    // 5. 更新迟滞状态
+    // 6. 双押判定（核心修改：不再固定取 Top2）
+    //    三重条件全部满足才允许双押：
+    //    a) 间隔约束：距上次双押至少隔 MIN_BEAT_BETWEEN_DOUBLE 个节拍
+    //    b) 能量比值：第 2 轨能量 ≥ 第 1 轨 × DOUBLE_PRESS_ENERGY_RATIO_PCT%
+    //    c) 弱音保护：第 1 轨能量 < 第 2 轨 × WEAK_TONE_RATIO_PCT%（防单轨独大）
+    bool allowDouble = false;
+    if (finalEnergy[indices[0]] > 0.0f && finalEnergy[indices[1]] > 0.0f) {
+        // 条件 a: 间隔约束
+        bool intervalOk = (m_lastDoubleBeatIndex < 0) ||
+                          (beatIndex - m_lastDoubleBeatIndex >= MIN_BEAT_BETWEEN_DOUBLE);
+
+        // 条件 b: 能量比值（第 2 轨不能太弱，用整数乘 100 避免浮点除法）
+        bool energyRatioOk = finalEnergy[indices[1]] * 100 >=
+                              finalEnergy[indices[0]] * DOUBLE_PRESS_ENERGY_RATIO_PCT;
+
+        // 条件 c: 弱音保护（第 1 轨不能远超第 2 轨）
+        bool notDominant = finalEnergy[indices[0]] * 100 <
+                           finalEnergy[indices[1]] * WEAK_TONE_RATIO_PCT;
+
+        allowDouble = intervalOk && energyRatioOk && notDominant;
+    }
+
+    if (allowDouble) {
+        int secondLane = indices[1];
+        // 确保不与 topLane 重复
+        if (secondLane != topLane) {
+            result.append(secondLane);
+            m_lastDoubleBeatIndex = beatIndex;
+        }
+    }
+
+    // 7. 更新迟滞状态
     //    本次触发的轨道：设置惩罚计数 = 2（接下来 2 拍内惩罚递减）
     //    未触发的轨道：计数 -1（最低到 0）
     bool triggered[NUM_LANES] = {false, false, false, false};
@@ -228,9 +263,7 @@ QVector<int> BeatDetector::assignLanes(const QVector<float>& magnitude, int fftS
 }
 
 QVector<float> BeatDetector::computeSpectralFlux(const QVector<float>& pcm, int sampleRate,
-                                                  QVector<QVector<float>>& magnitudeCache,
-                                                  std::function<void(int)> progressCallback,
-                                                  volatile bool* cancelFlag)
+                                                  MagnitudeCache& magnitudeCache)
 {
     FFTAnalyzer fft(m_fftSize);
     int totalFrames = (pcm.size() - m_fftSize) / m_hopSize + 1;
@@ -246,15 +279,15 @@ QVector<float> BeatDetector::computeSpectralFlux(const QVector<float>& pcm, int 
 
     for (int frame = 0; frame < totalFrames; ++frame) {
         // 检查取消标志
-        if (cancelFlag && *cancelFlag) {
+        if (m_cancelled) {
             flux.clear();
             magnitudeCache.clear();
             return flux;
         }
 
         // 每 50 帧报告一次进度
-        if (progressCallback && frame % 50 == 0) {
-            progressCallback(frame * 100 / totalFrames);
+        if (frame % 50 == 0) {
+            emit progressChanged(frame * 100 / totalFrames);
         }
 
         int startSample = frame * m_hopSize;
@@ -288,9 +321,7 @@ QVector<float> BeatDetector::computeSpectralFlux(const QVector<float>& pcm, int 
     }
 
     // 最终进度
-    if (progressCallback) {
-        progressCallback(100);
-    }
+    emit progressChanged(100);
 
     return flux;
 }
