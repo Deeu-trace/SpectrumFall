@@ -13,6 +13,8 @@
 #include <QListWidgetItem>
 #include <QMessageBox>
 #include <QMenu>
+#include <QDialog>
+#include <QApplication>
 #include <cmath>
 
 // ── 转圈加载动画组件（无 Q_OBJECT，仅供 SongSelectWidget 内部使用）──
@@ -62,6 +64,8 @@ private:
 SongSelectWidget::SongSelectWidget(QWidget* parent)
     : QWidget(parent)
     , m_analysisDone(false)
+    , m_spinner(nullptr)
+    , m_spinnerDialog(nullptr)
 {
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setSpacing(10);
@@ -348,6 +352,57 @@ void SongSelectWidget::loadFromCache(const QString& filePath, float bpm, qint64 
     m_gameBtn->setEnabled(true);
 
     m_fileInfoPanel->show();
+}
+
+void SongSelectWidget::showLoadingState()
+{
+    // 创建一个独立的加载对话框（非模态，避免阻塞）
+    QDialog* dlg = new QDialog(this);
+    dlg->setWindowTitle(QStringLiteral("加载中"));
+    dlg->setFixedSize(200, 120);
+    dlg->setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
+    dlg->setStyleSheet("QDialog { background-color: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; }");
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+    QVBoxLayout* layout = new QVBoxLayout(dlg);
+    layout->setAlignment(Qt::AlignCenter);
+    layout->setSpacing(12);
+
+    SpinnerWidget* spinner = new SpinnerWidget(dlg);
+    spinner->setFixedSize(36, 36);
+    QHBoxLayout* spinLayout = new QHBoxLayout();
+    spinLayout->setAlignment(Qt::AlignCenter);
+    spinLayout->addWidget(spinner);
+    layout->addLayout(spinLayout);
+
+    QLabel* label = new QLabel(QStringLiteral("加载中..."), dlg);
+    label->setAlignment(Qt::AlignCenter);
+    label->setStyleSheet("color: #00ff88; font-size: 14px; background: transparent;");
+    layout->addWidget(label);
+
+    spinner->start();
+
+    dlg->show();
+    dlg->raise();
+
+    // 存储指针供 hideLoadingState 使用
+    m_spinner = nullptr;  // 不再用原来的 spinner
+    m_spinnerDialog = dlg;
+
+    // 禁用底层交互
+    m_historyList->setEnabled(false);
+    m_backBtn->setEnabled(false);
+}
+
+void SongSelectWidget::hideLoadingState()
+{
+    if (m_spinnerDialog) {
+        m_spinnerDialog->close();  // WA_DeleteOnClose 会自动删除
+        m_spinnerDialog = nullptr;
+    }
+
+    m_backBtn->setEnabled(true);
+    m_historyList->setEnabled(true);
 }
 
 // ── 私有槽 ────────────────────────────────────────────────────

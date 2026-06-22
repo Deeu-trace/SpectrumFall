@@ -12,6 +12,11 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QEventLoop>
 #include <QtConcurrent>
 #include <QMessageBox>
 
@@ -33,6 +38,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_analyzedBpm(0.0f)
     , m_analysisTimer(new QTimer(this))
     , m_analysisActive(false)
+    , m_gameLaneCount(6)
 {
     setupUI();
     connectSignals();
@@ -166,8 +172,10 @@ void MainWindow::onSongSelectRequested()
 
 void MainWindow::onAnalyzeRequested(const QString& path)
 {
-    // 防止重复点击
     if (m_analysisActive) return;
+
+    // 分析阶段始终用 6 键生成谱面（更细频带），4/6 键选择在"开始游戏"时弹出
+    m_gameLaneCount = 6;
 
     m_currentSongPath = path;
     m_loadSuccess = false;
@@ -195,12 +203,9 @@ void MainWindow::onAnalyzeRequested(const QString& path)
         }
 
         if (detector->isCancelled()) return;
-
-        // 更新时长 + 进度
         emit durationUpdated(engine->duration());
         emit analysisProgressChanged(30);
 
-        // 检查音频是否太短
         if (engine->duration() < 10000) {
             m_loadSuccess = false;
             m_errorMessage = QStringLiteral("音频太短（不足 10 秒），无法生成谱面");
@@ -210,16 +215,14 @@ void MainWindow::onAnalyzeRequested(const QString& path)
         if (detector->isCancelled()) return;
 
         // ── Phase 2: 节拍检测（30% → 85%）──
-        // 进度由 BeatDetector::progressChanged 信号报告（已在 connectSignals 中连接）
         const QVector<float>& pcm = engine->pcmData();
-        detector->analyze(pcm, engine->sampleRate());
+        detector->analyze(pcm, engine->sampleRate(), m_gameLaneCount);
 
         if (detector->isCancelled()) return;
-
         emit analysisProgressChanged(90);
 
         // ── Phase 3: 生成谱面（90% → 100%）──
-        m_pendingNotes = generator->generate(detector->beatPoints());
+        m_pendingNotes = generator->generate(detector->beatPoints(), 200, m_gameLaneCount);
         m_analyzedBpm = detector->bpm();
         m_loadSuccess = true;
 
@@ -300,8 +303,85 @@ void MainWindow::onGameRequested()
         return;
     }
 
+    // ── 模式选择界面（内嵌 widget，非模态对话框）──
+    // 创建一个无边框半透明遮罩 widget，覆盖在歌曲选择页上
+    QWidget* overlay = new QWidget(m_songSelectPage);
+    overlay->setObjectName("modeSelectOverlay");
+    overlay->setGeometry(m_songSelectPage->rect());
+    overlay->setStyleSheet("QWidget#modeSelectOverlay { background-color: rgba(5, 5, 20, 230); }");
+
+    QVBoxLayout* ol = new QVBoxLayout(overlay);
+    ol->setAlignment(Qt::AlignCenter);
+    ol->setSpacing(20);
+
+    QLabel* title = new QLabel(QStringLiteral("选择游戏模式"), overlay);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("font-size: 28px; font-weight: bold; color: #00ff88; background: transparent;");
+    ol->addWidget(title);
+
+    QHBoxLayout* bl = new QHBoxLayout();
+    bl->setSpacing(20);
+
+    QPushButton* btn4 = new QPushButton(QStringLiteral("4 键\n\nD  F  J  K"), overlay);
+    btn4->setMinimumSize(180, 120);
+    btn4->setStyleSheet(
+        "QPushButton { font-size: 20px; font-weight: bold; color: #e0e0e0; "
+        "  background-color: #16213e; border: 2px solid #0f3460; border-radius: 12px; }"
+        "QPushButton:hover { background-color: #1a1a40; border-color: #00ff88; color: #00ff88; }"
+    );
+    bl->addWidget(btn4);
+
+    QPushButton* btn6 = new QPushButton(QStringLiteral("6 键\n\nS  D  F  J  K  L"), overlay);
+    btn6->setMinimumSize(180, 120);
+    btn6->setStyleSheet(
+        "QPushButton { font-size: 20px; font-weight: bold; color: #e0e0e0; "
+        "  background-color: #16213e; border: 2px solid #0f3460; border-radius: 12px; }"
+        "QPushButton:hover { background-color: #1a1a40; border-color: #00ff88; color: #00ff88; }"
+    );
+    bl->addWidget(btn6);
+    ol->addLayout(bl);
+
+    QPushButton* cancelBtn = new QPushButton(QStringLiteral("取消"), overlay);
+    cancelBtn->setMinimumSize(100, 36);
+    cancelBtn->setStyleSheet(
+        "QPushButton { font-size: 14px; color: #8888aa; "
+        "  background-color: transparent; border: 1px solid #333; border-radius: 6px; }"
+        "QPushButton:hover { color: #ff5577; border-color: #ff5577; }"
+    );
+    ol->addWidget(cancelBtn);
+
+    overlay->show();
+    overlay->raise();
+
+    int mode = 0;
+    auto chooseMode = [overlay, &mode](int m) {
+        mode = m;
+        overlay->deleteLater();
+    };
+    connect(btn4, &QPushButton::clicked, [chooseMode]() { chooseMode(4); });
+    connect(btn6, &QPushButton::clicked, [chooseMode]() { chooseMode(6); });
+    connect(cancelBtn, &QPushButton::clicked, overlay, &QWidget::deleteLater);
+
+    // 嵌套事件循环，等 overlay 被 deleteLater 后退出
+    QEventLoop loop;
+    connect(overlay, &QWidget::destroyed, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    if (mode == 0) return;
+    m_gameLaneCount = mode;
+
+    // 选 4 键时：把 6 键的 lane 映射到 4 键
+    if (m_gameLaneCount == 4) {
+        static const int laneMap6to4[6] = {0, 0, 1, 2, 3, 3};
+        for (auto& note : m_currentNotes) {
+            if (note.lane >= 0 && note.lane < 6) {
+                note.lane = laneMap6to4[note.lane];
+            }
+        }
+    }
+
     navigateTo(3);
-    m_gamePage->startGame(m_currentNotes);
+    m_gamePage->startGame(m_currentNotes, m_gameLaneCount);
 }
 
 void MainWindow::onGameFinished()
@@ -326,7 +406,7 @@ void MainWindow::onRetryRequested()
         return;
     }
     navigateTo(3);
-    m_gamePage->startGame(m_currentNotes);
+    m_gamePage->startGame(m_currentNotes, m_gameLaneCount);
 }
 
 void MainWindow::onBackToMenuRequested()
@@ -353,16 +433,20 @@ void MainWindow::onHistorySelected(const QString& filePath)
     if (!m_cacheManager->hasValidCache(filePath)) {
         m_songSelectPage->showAnalysisError(
             QStringLiteral("音频文件已被修改或删除，请重新选择并分析"));
-        // 删除无效缓存
         m_cacheManager->remove(filePath);
         refreshHistory();
         return;
     }
 
+    // ── 显示加载中状态 ──
+    m_songSelectPage->showLoadingState();
+    QApplication::processEvents();  // 立即刷新 UI
+
     // 加载音频文件（播放用）
     m_currentSongPath = filePath;
     bool loadOk = m_audioEngine->loadFile(filePath);
     if (!loadOk) {
+        m_songSelectPage->hideLoadingState();
         m_songSelectPage->showAnalysisError(
             QStringLiteral("无法加载音频文件，请检查文件是否损坏"));
         return;
@@ -376,8 +460,9 @@ void MainWindow::onHistorySelected(const QString& filePath)
     }
     m_analyzedBpm = entry->bpm;
 
-    // 更新 UI 为已分析状态（使用公开方法，不直接访问私有成员）
+    // 更新 UI 为已分析状态
     m_songSelectPage->loadFromCache(filePath, m_analyzedBpm, entry->durationMs);
+    m_songSelectPage->hideLoadingState();
 }
 
 void MainWindow::onHistoryDeleteRequested(const QString& filePath)

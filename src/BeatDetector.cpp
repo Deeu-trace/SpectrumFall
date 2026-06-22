@@ -4,26 +4,33 @@
 #include <cmath>
 #include <algorithm>
 
-// ── 对数频带定义 ──────────────────────────────────────────
-// 采样率 44100Hz，FFT 1024 → 每个 bin = 44100/1024 ≈ 43.07Hz
-// D: 60-250Hz   → bin 1~5    (低频，鼓/贝斯)，补偿 ÷2.0 降权
-// F: 250-1000Hz → bin 6~23   (中低频，吉他/人声)，补偿 ÷1.3
-// J: 1000-4000Hz → bin 24~92  (中高频，合成器/镲)，补偿 ÷0.7 升权
-// K: 4000-22050Hz → bin 93~511 (高频，气息/泛音)，补偿 ÷0.3 强升权
-const BeatDetector::BandDef BeatDetector::s_bands[NUM_LANES] = {
-    {  60.0f,   250.0f, 2.0f },   // D 轨
-    { 250.0f,  1000.0f, 1.3f },   // F 轨
-    {1000.0f,  4000.0f, 0.7f },   // J 轨
-    {4000.0f, 22050.0f, 0.3f },   // K 轨
+// ── 频带定义 ──────────────────────────────────────────────
+const BeatDetector::BandDef BeatDetector::s_bands4[4] = {
+    {  60.0f,   250.0f },   // D 轨
+    { 250.0f,  1000.0f },   // F 轨
+    {1000.0f,  4000.0f },   // J 轨
+    {4000.0f, 22050.0f },   // K 轨
+};
+const BeatDetector::BandDef BeatDetector::s_bands6[6] = {
+    {  20.0f,   120.0f },   // S 轨
+    { 120.0f,   400.0f },   // D 轨
+    { 400.0f,  1200.0f },   // F 轨
+    {1200.0f,  3500.0f },   // J 轨
+    {3500.0f,  8000.0f },   // K 轨
+    {8000.0f, 22050.0f },   // L 轨
 };
 
 BeatDetector::BeatDetector(QObject* parent)
     : QObject(parent)
     , m_bpm(0.0f)
-    , m_fftSize(1024)    // 节拍检测用 1024 即可，速度比 2048 快 ~2x
-    , m_hopSize(1024)    // 帧移 = fftSize，无重叠，总帧数减少 ~2x
+    , m_fftSize(1024)
+    , m_hopSize(1024)
     , m_cancelled(false)
-    , m_hysteresisCount{0, 0, 0, 0}
+    , m_laneCount(6)
+    , m_hysteresisCount{0, 0, 0, 0, 0, 0}
+    , m_bandSum{0, 0, 0, 0, 0, 0}
+    , m_bandCount{0, 0, 0, 0, 0, 0}
+    , m_laneStarvation{0, 0, 0, 0, 0, 0}
     , m_lastDoubleBeatIndex(-1)
 {
 }
@@ -33,15 +40,19 @@ void BeatDetector::requestCancel()
     m_cancelled = true;
 }
 
-void BeatDetector::analyze(const QVector<float>& pcm, int sampleRate)
+void BeatDetector::analyze(const QVector<float>& pcm, int sampleRate, int laneCount)
 {
     m_beatPoints.clear();
     m_bpm = 0.0f;
     m_cancelled = false;
+    m_laneCount = qBound(4, laneCount, 6);
 
-    // 重置迟滞状态
-    for (int i = 0; i < NUM_LANES; ++i) {
+    // 重置迟滞 + 归一化 + 配额状态
+    for (int i = 0; i < MAX_LANES; ++i) {
         m_hysteresisCount[i] = 0;
+        m_bandSum[i] = 0.0f;
+        m_bandCount[i] = 0;
+        m_laneStarvation[i] = 0;
     }
     m_lastDoubleBeatIndex = -1;
 
@@ -161,101 +172,91 @@ QVector<int> BeatDetector::assignLanes(const QVector<float>& magnitude, int fftS
         return result;
     }
 
+    int N = m_laneCount;
+    const BandDef* bands = (N == 4) ? s_bands4 : s_bands6;
     float binHz = static_cast<float>(sampleRate) / static_cast<float>(fftSize);
 
-    // 1. 计算每个对数频带的原始能量
-    float rawEnergy[NUM_LANES];
-    for (int i = 0; i < NUM_LANES; ++i) {
-        int binStart = static_cast<int>(s_bands[i].freqLow / binHz);
-        int binEnd   = static_cast<int>(s_bands[i].freqHigh / binHz);
-        // 确保至少有 1 个 bin
+    // 1. 计算每轨能量 + 动态归一化
+    float score[MAX_LANES];
+    for (int i = 0; i < N; ++i) {
+        int binStart = static_cast<int>(bands[i].freqLow / binHz);
+        int binEnd   = static_cast<int>(bands[i].freqHigh / binHz);
         binEnd = qMax(binEnd, binStart + 1);
-        rawEnergy[i] = bandEnergy(magnitude, binStart, binEnd);
-    }
+        float raw = bandEnergy(magnitude, binStart, binEnd);
 
-    // 2. 补偿系数处理：低频轨降权、高频轨升权
-    float compensated[NUM_LANES];
-    for (int i = 0; i < NUM_LANES; ++i) {
-        compensated[i] = rawEnergy[i] / s_bands[i].compensateDivisor;
-    }
+        // 动态归一化：当前能量 ÷ 该轨历史均值
+        float avg = (m_bandCount[i] > 0) ? (m_bandSum[i] / m_bandCount[i]) : 1.0f;
+        score[i] = raw / (avg + 0.0001f);  // +epsilon 防 /0
 
-    // 3. 迟滞惩罚：刚触发过的轨道，能量乘以衰减系数
-    //    m_hysteresisCount > 0 时，惩罚 = 0.5^(count)，每拍减 1
-    float hysteresisFactor[NUM_LANES];
-    for (int i = 0; i < NUM_LANES; ++i) {
+        // 更新历史（衰减平均，防溢出）
+        m_bandSum[i] += raw;
+        m_bandCount[i] += 1;
+
+        // 迟滞惩罚
         if (m_hysteresisCount[i] > 0) {
-            // count=1 → 0.5, count=2 → 0.25
-            hysteresisFactor[i] = std::pow(0.5f, static_cast<float>(m_hysteresisCount[i]));
-        } else {
-            hysteresisFactor[i] = 1.0f;
+            score[i] *= std::pow(0.5f, static_cast<float>(m_hysteresisCount[i]));
         }
     }
+    // 补零未使用的轨道
+    for (int i = N; i < MAX_LANES; ++i) score[i] = 0.0f;
 
-    float finalEnergy[NUM_LANES];
-    for (int i = 0; i < NUM_LANES; ++i) {
-        finalEnergy[i] = compensated[i] * hysteresisFactor[i];
-    }
-
-    // 4. 按最终能量排序（降序）
-    int indices[NUM_LANES] = {0, 1, 2, 3};
-    std::sort(indices, indices + NUM_LANES, [&finalEnergy](int a, int b) {
-        return finalEnergy[a] > finalEnergy[b];
+    // 2. 排序
+    int indices[MAX_LANES] = {0, 1, 2, 3, 4, 5};
+    std::sort(indices, indices + N, [&score](int a, int b) {
+        return score[a] > score[b];
     });
 
-    // 5. 取能量最高的轨道（单键，必须 > 0）
+    // 3. 取最高分轨道
     int topLane = indices[0];
-    if (finalEnergy[topLane] > 0.0f) {
+    if (score[topLane] > 0.0f) {
         result.append(topLane);
     }
-
-    // 安全兜底：如果没有任何轨道有能量，分配 D 轨
     if (result.isEmpty()) {
         result.append(0);
     }
 
-    // 6. 双押判定（核心修改：不再固定取 Top2）
-    //    三重条件全部满足才允许双押：
-    //    a) 间隔约束：距上次双押至少隔 MIN_BEAT_BETWEEN_DOUBLE 个节拍
-    //    b) 能量比值：第 2 轨能量 ≥ 第 1 轨 × DOUBLE_PRESS_ENERGY_RATIO_PCT%
-    //    c) 弱音保护：第 1 轨能量 < 第 2 轨 × WEAK_TONE_RATIO_PCT%（防单轨独大）
-    bool allowDouble = false;
-    if (finalEnergy[indices[0]] > 0.0f && finalEnergy[indices[1]] > 0.0f) {
-        // 条件 a: 间隔约束
-        bool intervalOk = (m_lastDoubleBeatIndex < 0) ||
-                          (beatIndex - m_lastDoubleBeatIndex >= MIN_BEAT_BETWEEN_DOUBLE);
-
-        // 条件 b: 能量比值（第 2 轨不能太弱，用整数乘 100 避免浮点除法）
-        bool energyRatioOk = finalEnergy[indices[1]] * 100 >=
-                              finalEnergy[indices[0]] * DOUBLE_PRESS_ENERGY_RATIO_PCT;
-
-        // 条件 c: 弱音保护（第 1 轨不能远超第 2 轨）
-        bool notDominant = finalEnergy[indices[0]] * 100 <
-                           finalEnergy[indices[1]] * WEAK_TONE_RATIO_PCT;
-
-        allowDouble = intervalOk && energyRatioOk && notDominant;
+    // 3.5 配额机制：如果某轨连续 8 个节拍没有音符，强制分配给它
+    //     这保证 K/L 等高音轨道即使能量很低也会定期出现音符
+    static const int STARVATION_THRESHOLD = 8;
+    int starvedLane = -1;
+    int maxStarvation = 0;
+    for (int i = 0; i < N; ++i) {
+        if (i != topLane && m_laneStarvation[i] > STARVATION_THRESHOLD &&
+            m_laneStarvation[i] > maxStarvation) {
+            maxStarvation = m_laneStarvation[i];
+            starvedLane = i;
+        }
+    }
+    if (starvedLane >= 0) {
+        result.append(starvedLane);
     }
 
-    if (allowDouble) {
-        int secondLane = indices[1];
-        // 确保不与 topLane 重复
-        if (secondLane != topLane) {
-            result.append(secondLane);
+    // 4. 双押判定（配额触发不算双押，不影响间隔）
+    if (starvedLane < 0) {  // 没有配额触发时才检查双押
+        bool allowDouble = false;
+        if (N >= 2 && score[indices[0]] > 0.0f && score[indices[1]] > 0.0f) {
+            bool intervalOk = (m_lastDoubleBeatIndex < 0) ||
+                              (beatIndex - m_lastDoubleBeatIndex >= MIN_BEAT_BETWEEN_DOUBLE);
+            bool energyRatioOk = score[indices[1]] * 100 >= score[indices[0]] * DOUBLE_PRESS_ENERGY_RATIO_PCT;
+            bool notDominant = score[indices[0]] * 100 < score[indices[1]] * WEAK_TONE_RATIO_PCT;
+            allowDouble = intervalOk && energyRatioOk && notDominant;
+        }
+        if (allowDouble && indices[1] != topLane) {
+            result.append(indices[1]);
             m_lastDoubleBeatIndex = beatIndex;
         }
     }
 
-    // 7. 更新迟滞状态
-    //    本次触发的轨道：设置惩罚计数 = 2（接下来 2 拍内惩罚递减）
-    //    未触发的轨道：计数 -1（最低到 0）
-    bool triggered[NUM_LANES] = {false, false, false, false};
-    for (int lane : result) {
-        triggered[lane] = true;
-    }
-    for (int i = 0; i < NUM_LANES; ++i) {
+    // 5. 更新迟滞 + 配额
+    bool triggered[MAX_LANES] = {false};
+    for (int lane : result) triggered[lane] = true;
+    for (int i = 0; i < N; ++i) {
         if (triggered[i]) {
-            m_hysteresisCount[i] = 2;  // 接下来 2 拍受惩罚
+            m_hysteresisCount[i] = 2;
+            m_laneStarvation[i] = 0;  // 重置饥饿计数
         } else {
             m_hysteresisCount[i] = qMax(0, m_hysteresisCount[i] - 1);
+            m_laneStarvation[i]++;   // 增加饥饿计数
         }
     }
 

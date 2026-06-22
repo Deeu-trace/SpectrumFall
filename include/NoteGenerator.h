@@ -24,6 +24,7 @@ class NoteGenerator
 public:
     NoteGenerator() = default;
 
-    /// 从节拍点生成游戏音符，minGapMs 为最小间隔（毫秒）
-    QVector<GameNote> generate(const QVector<BeatPoint>& beatPoints, qint64 minGapMs = 200);
+    /// 从节拍点生成游戏音符
+    /// @param laneCount 轨道数（4 或 6），用于兜底
+    QVector<GameNote> generate(const QVector<BeatPoint>& beatPoints, qint64 minGapMs = 200, int laneCount = 6);
 };

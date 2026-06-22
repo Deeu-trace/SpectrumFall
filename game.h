@@ -90,6 +90,7 @@ private:
     // 分析超时
     QTimer* m_analysisTimer;             ///< 90s 超时定时器
     bool m_analysisActive;               ///< 分析是否正在进行
+    int m_gameLaneCount;                 ///< 当前游戏键数（4 或 6）
 
     // ── 跨线程信号（供后台分析 lambda 通过 QueuedConnection 安全更新 UI）──
 signals:

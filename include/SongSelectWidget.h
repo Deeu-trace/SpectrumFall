@@ -10,6 +10,7 @@ class QProgressBar;
 class QListWidget;
 class QListWidgetItem;
 class QMenu;
+class QDialog;
 class SpinnerWidget;
 
 struct CacheEntry;  // 前向声明，避免包含 CacheManager.h
@@ -45,6 +46,12 @@ public:
 
     /// 从缓存加载完成，设置 UI 为"已分析"状态
     void loadFromCache(const QString& filePath, float bpm, qint64 durationMs);
+
+    /// 显示加载中状态（禁用所有按钮 + 显示 spinner）
+    void showLoadingState();
+
+    /// 隐藏加载中状态（恢复按钮可用性）
+    void hideLoadingState();
 
 signals:
     void analyzeRequested(const QString& path);
@@ -84,6 +91,7 @@ private:
 
     QProgressBar* m_progressBar;     ///< 分析进度条
     SpinnerWidget* m_spinner;        ///< 转圈加载动画
+    QDialog* m_spinnerDialog;        ///< 加载弹窗（历史记录加载用）
 
     QWidget* m_fileInfoPanel;        ///< 文件信息+分析区域容器
 

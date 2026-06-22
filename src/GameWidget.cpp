@@ -21,7 +21,6 @@
 static constexpr qreal SCROLL_SPEED = 0.35;     // 像素/毫秒（下落速度，降低让玩家有更多反应时间）
 static constexpr qint64 VISIBLE_AHEAD = 3000;   // 提前 3 秒显示音符
 static constexpr qint64 MISS_THRESHOLD = 300;   // 超过 300ms 视为 Miss（音符过了判定线后的容许窗口）
-static constexpr int LANE_COUNT = 4;
 static constexpr int DEFAULT_MIN_GAP_MS = 900;   // 默认同轨道最小间隔 900ms
 static constexpr int MIN_GAP_MS = 150;          // 同轨道滑块最小值
 static constexpr int MAX_GAP_MS = 1000;         // 同轨道滑块最大值
@@ -54,6 +53,7 @@ GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWi
     , m_judgeLineY(0.85)
     , m_noteSpeed(SCROLL_SPEED)
     , m_trackWidth(80)
+    , m_laneCount(6)
     , m_startPosMs(0)
     , m_pauseElapsedMs(0)
     , m_totalPausedMs(0)
@@ -64,11 +64,13 @@ GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWi
 {
     m_renderTimer->setInterval(16); // ~60Hz
 
-    // 按键状态初始化
-    m_keyPressed[0] = false; // D
-    m_keyPressed[1] = false; // F
-    m_keyPressed[2] = false; // J
-    m_keyPressed[3] = false; // K
+    // 按键状态初始化（6 键最大）
+    m_keyPressed[0] = false; // S
+    m_keyPressed[1] = false; // D
+    m_keyPressed[2] = false; // F
+    m_keyPressed[3] = false; // J
+    m_keyPressed[4] = false; // K
+    m_keyPressed[5] = false; // L
 
     setFocusPolicy(Qt::StrongFocus);
 
@@ -295,13 +297,13 @@ void GameWidget::applyDensityFilter()
     m_notes.clear();
 
     // 每个轨道独立追踪最近时间戳
-    qint64 lastTimestampPerLane[4] = {-m_minGapMs, -m_minGapMs, -m_minGapMs, -m_minGapMs};
+    QVector<qint64> lastTimestampPerLane(m_laneCount, -m_minGapMs);
     // 全局最近时间戳（任何轨道产生音符后都更新）
     qint64 lastGlobalTimestamp = -m_globalMinGapMs;
 
     for (const GameNote& note : m_allNotes) {
         int lane = note.lane;
-        if (lane < 0 || lane > 3) lane = 0;
+        if (lane < 0 || lane >= m_laneCount) lane = 1;
 
         // 检查 1: 同轨道间隔
         if (note.timestampMs - lastTimestampPerLane[lane] < m_minGapMs) {
@@ -319,9 +321,10 @@ void GameWidget::applyDensityFilter()
     }
 }
 
-void GameWidget::startGame(const QVector<GameNote>& notes)
+void GameWidget::startGame(const QVector<GameNote>& notes, int laneCount)
 {
-    m_allNotes = notes;  // 保存原始完整音符列表
+    m_laneCount = qBound(4, laneCount, 6);
+    m_allNotes = notes;
     m_minGapMs = DEFAULT_MIN_GAP_MS;
     m_globalMinGapMs = DEFAULT_GLOBAL_MIN_GAP_MS;
     m_densityChanged = false;
@@ -461,13 +464,14 @@ void GameWidget::paintEvent(QPaintEvent* event)
     }
 
     // ═══ 2. 轨道参数 ═══
-    m_trackWidth = qMax(60.0, w * 0.12);
-    qreal totalTrackWidth = m_trackWidth * LANE_COUNT;
+    int N = m_laneCount;
+    m_trackWidth = qMax(45.0, w * (N == 4 ? 0.12 : 0.09));
+    qreal totalTrackWidth = m_trackWidth * N;
     qreal startX = (w - totalTrackWidth) / 2.0;
     qreal judgeY = h * m_judgeLineY;
 
     // ═══ 3. 轨道灯带 ═══
-    for (int i = 0; i < LANE_COUNT; ++i) {
+    for (int i = 0; i < N; ++i) {
         qreal x = startX + i * m_trackWidth;
         QColor lc = laneColor(i);
 
@@ -498,7 +502,7 @@ void GameWidget::paintEvent(QPaintEvent* event)
     }
 
     // 轨道边线
-    for (int i = 0; i <= LANE_COUNT; ++i) {
+    for (int i = 0; i <= N; ++i) {
         qreal x = startX + i * m_trackWidth;
         painter.setPen(QPen(QColor(60, 60, 100, 60), 1));
         painter.drawLine(QPointF(x, 0), QPointF(x, h));
@@ -553,7 +557,7 @@ void GameWidget::paintEvent(QPaintEvent* event)
     painter.drawLine(QPointF(startX, judgeY), QPointF(startX + totalTrackWidth, judgeY));
 
     // 按键时轨道底部高亮
-    for (int i = 0; i < LANE_COUNT; ++i) {
+    for (int i = 0; i < N; ++i) {
         if (m_keyPressed.value(i, false)) {
             qreal x = startX + i * m_trackWidth;
             QColor color = laneColor(i);
@@ -621,7 +625,27 @@ void GameWidget::paintEvent(QPaintEvent* event)
                          Qt::AlignCenter, popup.text);
     }
 
-    // ═══ 10. HUD：分数和连击 ═══
+    // ═══ 10. HUD：进度条 + 分数和连击 ═══
+    // 顶部进度条（纯长方体，不可拖拽）
+    if (m_audioEngine && m_audioEngine->duration() > 0) {
+        qint64 dur = m_audioEngine->duration();
+        qint64 pos = qBound<qint64>(0, getGameTime(), dur);
+        qreal progress = static_cast<qreal>(pos) / dur;
+        qreal barY = 4;
+        qreal barH = 4;
+        qreal barW = w - 30;
+        qreal barX = 15;
+
+        // 背景
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(30, 30, 50, 200));
+        painter.drawRoundedRect(QRectF(barX, barY, barW, barH), 2, 2);
+
+        // 已播放部分
+        painter.setBrush(QColor(0, 255, 136, 220));
+        painter.drawRoundedRect(QRectF(barX, barY, barW * progress, barH), 2, 2);
+    }
+
     QFont hudFont;
     hudFont.setPixelSize(20);
     painter.setFont(hudFont);
@@ -657,13 +681,15 @@ void GameWidget::paintEvent(QPaintEvent* event)
                          QStringLiteral("%1 Combo").arg(combo));
     }
 
-    // 底部按键提示 + 密度
+    // 底部按键提示
     hudFont.setPixelSize(14);
     hudFont.setBold(false);
     painter.setFont(hudFont);
     painter.setPen(QColor(120, 120, 160));
-    const QString keys[] = {"D", "F", "J", "K"};
-    for (int i = 0; i < LANE_COUNT; ++i) {
+    const QString keys4[] = {"D", "F", "J", "K"};
+    const QString keys6[] = {"S", "D", "F", "J", "K", "L"};
+    const QString* keys = (N == 4) ? keys4 : keys6;
+    for (int i = 0; i < N; ++i) {
         qreal x = startX + i * m_trackWidth;
         painter.drawText(QRectF(x, h - 25, m_trackWidth, 20), Qt::AlignCenter, keys[i]);
     }
@@ -680,36 +706,36 @@ void GameWidget::keyPressEvent(QKeyEvent* event)
     if (event->isAutoRepeat()) return;
 
     int lane = -1;
-    switch (event->key()) {
-    case Qt::Key_D: lane = 0; break;
-    case Qt::Key_F: lane = 1; break;
-    case Qt::Key_J: lane = 2; break;
-    case Qt::Key_K: lane = 3; break;
-    case Qt::Key_Escape:
-        if (!m_gameActive) {
+    if (m_laneCount == 4) {
+        switch (event->key()) {
+        case Qt::Key_D: lane = 0; break;
+        case Qt::Key_F: lane = 1; break;
+        case Qt::Key_J: lane = 2; break;
+        case Qt::Key_K: lane = 3; break;
+        }
+    } else {
+        switch (event->key()) {
+        case Qt::Key_S: lane = 0; break;
+        case Qt::Key_D: lane = 1; break;
+        case Qt::Key_F: lane = 2; break;
+        case Qt::Key_J: lane = 3; break;
+        case Qt::Key_K: lane = 4; break;
+        case Qt::Key_L: lane = 5; break;
+        }
+    }
+    if (lane < 0) {
+        switch (event->key()) {
+        case Qt::Key_Escape:
+            if (!m_gameActive) return;
+            if (m_paused) { resumeGame(); m_pauseOverlay->hide(); }
+            else { pauseGame(); m_pauseOverlay->setGeometry(0, 0, width(), height()); m_pauseOverlay->show(); m_continueBtn->setFocus(); }
             return;
+        default: QWidget::keyPressEvent(event); return;
         }
-        if (m_paused) {
-            resumeGame();
-            m_pauseOverlay->hide();
-        } else {
-            pauseGame();
-            m_pauseOverlay->setGeometry(0, 0, width(), height());
-            m_pauseOverlay->show();
-            m_continueBtn->setFocus();
-        }
-        return;
-    default:
-        QWidget::keyPressEvent(event);
-        return;
     }
 
-    if (lane >= 0) {
-        m_keyPressed[lane] = true;
-        if (m_gameActive && !m_paused) {
-            judgeLane(lane);
-        }
-    }
+    m_keyPressed[lane] = true;
+    if (m_gameActive && !m_paused) judgeLane(lane);
 }
 
 void GameWidget::keyReleaseEvent(QKeyEvent* event)
@@ -717,19 +743,25 @@ void GameWidget::keyReleaseEvent(QKeyEvent* event)
     if (event->isAutoRepeat()) return;
 
     int lane = -1;
-    switch (event->key()) {
-    case Qt::Key_D: lane = 0; break;
-    case Qt::Key_F: lane = 1; break;
-    case Qt::Key_J: lane = 2; break;
-    case Qt::Key_K: lane = 3; break;
-    default:
-        QWidget::keyReleaseEvent(event);
-        return;
+    if (m_laneCount == 4) {
+        switch (event->key()) {
+        case Qt::Key_D: lane = 0; break;
+        case Qt::Key_F: lane = 1; break;
+        case Qt::Key_J: lane = 2; break;
+        case Qt::Key_K: lane = 3; break;
+        }
+    } else {
+        switch (event->key()) {
+        case Qt::Key_S: lane = 0; break;
+        case Qt::Key_D: lane = 1; break;
+        case Qt::Key_F: lane = 2; break;
+        case Qt::Key_J: lane = 3; break;
+        case Qt::Key_K: lane = 4; break;
+        case Qt::Key_L: lane = 5; break;
+        }
     }
-
-    if (lane >= 0) {
-        m_keyPressed[lane] = false;
-    }
+    if (lane >= 0) m_keyPressed[lane] = false;
+    else QWidget::keyReleaseEvent(event);
 }
 
 void GameWidget::onRenderTick()
@@ -814,10 +846,12 @@ void GameWidget::judgeLane(int lane)
 {
     if (!m_scoreManager) return;
 
-    // 使用高精度游戏时钟作为判定时间（不再依赖 QMediaPlayer::position()）
     qint64 hitTime = getGameTime();
 
-    // 找到该轨道最近的未判定音符
+    // 找到该轨道"最近且在判定窗口内"的未判定音符
+    // 判定窗口 = GOOD_WINDOW(150ms) + MISS_THRESHOLD(300ms) = 450ms
+    // 超过这个窗口的音符不允许提前按键判定
+    static const qint64 JUDGE_WINDOW = 450;  // ±450ms 内才允许判定
     qint64 minDelta = INT64_MAX;
     int bestIdx = -1;
 
@@ -826,13 +860,15 @@ void GameWidget::judgeLane(int lane)
         if (note.judged || note.lane != lane) continue;
 
         qint64 delta = qAbs(hitTime - note.timestampMs);
+        if (delta > JUDGE_WINDOW) continue;  // 超出判定窗口，不允许提前判定
+
         if (delta < minDelta) {
             minDelta = delta;
             bestIdx = i;
         }
     }
 
-    if (bestIdx < 0) return;
+    if (bestIdx < 0) return;  // 没有可判定的音符（空按无效）
 
     // 判定
     int result = m_scoreManager->judgeHit(hitTime, m_notes[bestIdx].timestampMs);
@@ -860,17 +896,20 @@ void GameWidget::judgeLane(int lane)
 QColor GameWidget::laneColor(int lane) const
 {
     switch (lane) {
-    case 0: return QColor(0, 255, 136);     // D: 荧光绿
-    case 1: return QColor(189, 147, 249);    // F: 浅紫
-    case 2: return QColor(139, 233, 253);    // J: 浅蓝
-    case 3: return QColor(255, 121, 198);    // K: 粉色
+    case 0: return m_laneCount == 4 ? QColor(0, 255, 136)   // 4键 D: 荧光绿
+                                    : QColor(0, 240, 255);  // 6键 S: 青色
+    case 1: return QColor(0, 255, 136);   // D: 荧光绿
+    case 2: return QColor(189, 147, 249); // F: 浅紫
+    case 3: return QColor(139, 233, 253); // J: 浅蓝
+    case 4: return QColor(255, 121, 198); // K: 粉色
+    case 5: return QColor(255, 180, 50);  // L: 金色
     default: return QColor(255, 255, 255);
     }
 }
 
 qreal GameWidget::laneX(int lane) const
 {
-    qreal totalTrackWidth = m_trackWidth * LANE_COUNT;
+    qreal totalTrackWidth = m_trackWidth * m_laneCount;
     qreal startX = (width() - totalTrackWidth) / 2.0;
     return startX + lane * m_trackWidth;
 }

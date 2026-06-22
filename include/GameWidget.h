@@ -42,7 +42,8 @@ struct ScorePopup {
     int maxAge;
 };
 
-/// 游戏页面：4 轨道下落式音符，判定线，键盘输入 D/F/J/K，判定文字动画
+/// 游戏页面：下落式音符，判定线，键盘输入，判定文字动画
+/// 支持 4 键 (D/F/J/K) 和 6 键 (S/D/F/J/K/L) 模式
 class GameWidget : public QWidget
 {
     Q_OBJECT
@@ -51,7 +52,8 @@ public:
     explicit GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWidget* parent = nullptr);
 
     /// 开始游戏（传入音符列表）
-    void startGame(const QVector<GameNote>& notes);
+    /// @param laneCount 轨道数（4 或 6）
+    void startGame(const QVector<GameNote>& notes, int laneCount = 6);
 
     /// 暂停游戏
     void pauseGame();
@@ -107,6 +109,7 @@ private:
     qreal m_judgeLineY;                ///< 判定线 Y 坐标
     qreal m_noteSpeed;                 ///< 音符下落速度（像素/毫秒）
     qreal m_trackWidth;                ///< 轨道宽度
+    int m_laneCount;                   ///< 轨道数（4 或 6）
 
     // ── 炫酷效果 ──
     QVector<QPointF> m_stars;          ///< 预生成的星光位置
