@@ -13,8 +13,14 @@ public:
     /// 重置所有数据
     void reset();
 
-    /// 判定击打：返回 1=Perfect, 2=Good, 3=Miss
+    /// 判定击打：返回 1=Perfect, 2=Good, 3=Miss（会加分）
     int judgeHit(qint64 hitTimeMs, qint64 noteTimeMs);
+
+    /// 仅检查判定结果，不修改分数/连击/计数（用于 Hold 头部判定）
+    int checkHit(qint64 hitTimeMs, qint64 noteTimeMs) const;
+
+    /// Hold 完成时根据头部判定结果加分
+    void scoreHoldComplete(int headResult);
 
     /// 记录一次 Miss
     void addMiss();

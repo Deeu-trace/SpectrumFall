@@ -5,6 +5,7 @@
 #include <QElapsedTimer>
 #include <QMap>
 #include <QVector>
+#include <QPixmap>
 #include "NoteGenerator.h"
 
 class AudioEngine;
@@ -81,12 +82,19 @@ private:
     /// 根据当前密度设置过滤音符列表
     void applyDensityFilter();
 
+    /// 将同轨道间距相近的 Tap 音符合并为 Hold 音符
+    void mergeHolds();
+
+    /// 处理 Hold 尾部释放判定
+    void judgeHoldRelease(int lane);
+
     AudioEngine* m_audioEngine;        ///< 音频引擎
     ScoreManager* m_scoreManager;      ///< 分数管理器
     QTimer* m_renderTimer;             ///< 渲染定时器
     QVector<GameNote> m_notes;         ///< 当前游戏音符列表（可能已过滤）
     QVector<GameNote> m_allNotes;      ///< 原始完整音符列表（未过滤）
     QMap<int, bool> m_keyPressed;      ///< 按键状态
+    QMap<int, int> m_activeHolds;      ///< 活跃 Hold：lane → m_notes 索引
     bool m_paused;                     ///< 是否暂停
     bool m_gameActive;                 ///< 游戏是否活跃
     int m_minGapMs;                    ///< 同轨道音符最小间隔（毫秒）
@@ -121,6 +129,7 @@ private:
     qreal m_comboScale;                ///< Combo 文字缩放动画
     int m_lastCombo;                   ///< 上一帧的 combo 值（用于检测变化）
     qint64 m_lastFrameTime;            ///< 上一帧时间戳
+    int m_holdSparkleCounter;          ///< Hold 持续粒子生成计数器
 
     // 暂停菜单
     QWidget* m_pauseOverlay;           ///< 暂停遮罩
@@ -149,9 +158,21 @@ private:
     /// 生成命中特效（粒子+环+脉冲）
     void spawnHitEffect(int lane, int judgment);
 
+    /// Hold 头部命中特效（增强爆发）
+    void spawnHoldHeadEffect(int lane, int judgment);
+
+    /// Hold 完成时的特效
+    void spawnHoldCompleteEffect(int lane, int judgment);
+
     /// 更新粒子/环/动画状态
     void updateEffects(qint64 deltaTimeMs);
 
     /// 生成星光
     void generateStars();
+
+    /// 重建缓存背景
+    void rebuildBackground();
+
+    QPixmap m_bgCache;                ///< 缓存的背景（星空+渐变）
+    QSize m_bgCacheSize;              ///< 缓存背景的尺寸（用于判断是否需要重建）
 };

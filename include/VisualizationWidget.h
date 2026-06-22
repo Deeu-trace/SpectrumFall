@@ -10,6 +10,8 @@ class CircularSpectrumVisualizer;
 class WaveformVisualizer;
 class WaterfallVisualizer;
 class GLSpectrumWidget;
+class AudioEffectWidget;
+class AudioEffectProcessor;
 class QPushButton;
 class QSlider;
 class QComboBox;
@@ -17,18 +19,15 @@ class QLabel;
 class QTimer;
 class AudioEngine;
 
-/// 可视化页面：中央可视化区域 + 底部播放控制 + 模式切换标签
 class VisualizationWidget : public QWidget
 {
     Q_OBJECT
 
 public:
     explicit VisualizationWidget(AudioEngine* audioEngine, QWidget* parent = nullptr);
+    ~VisualizationWidget() override;
 
-    /// 开始可视化渲染循环
     void startVisualization();
-
-    /// 停止可视化渲染循环
     void stopVisualization();
 
 signals:
@@ -36,6 +35,7 @@ signals:
 
 protected:
     void showEvent(QShowEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void onRenderTick();
@@ -47,26 +47,33 @@ private slots:
     void onPositionChanged(qint64 ms);
     void onDurationChanged(qint64 ms);
 
+    /// 更新时间标签
+    void updateTimeLabel(qint64 pos);
+
 private:
-    AudioEngine* m_audioEngine;              ///< 音频引擎
-    FFTAnalyzer m_fftAnalyzer;               ///< FFT 分析器（值成员，自动析构）
-    QStackedWidget* m_visStack;              ///< 可视化组件堆栈
-    BarSpectrumVisualizer* m_barWidget;       ///< 柱状频谱
-    CircularSpectrumVisualizer* m_circularWidget;///< 圆形频谱
-    WaveformVisualizer* m_waveformWidget;     ///< 波形
-    WaterfallVisualizer* m_waterfallWidget;   ///< 瀑布图
-    GLSpectrumWidget* m_glWidget;             ///< GLSL 着色器频谱（粒子+霓虹）
-    QPushButton* m_playPauseBtn;             ///< 播放/暂停按钮
-    QPushButton* m_backBtn;                  ///< 返回按钮
-    QSlider* m_positionSlider;               ///< 进度滑块
-    QSlider* m_volumeSlider;                 ///< 音量滑块
-    QSlider* m_compressionSlider;            ///< 频谱压缩强度滑块
-    QLabel* m_compressionLabel;              ///< 压缩强度值显示
-    QComboBox* m_fftSizeCombo;               ///< FFT 窗口大小选择
-    QComboBox* m_visModeCombo;               ///< 可视化模式选择
-    QLabel* m_timeLabel;                     ///< 时间显示标签
-    QTimer* m_renderTimer;                   ///< 渲染定时器（60Hz）
-    qint64 m_durationMs;                     ///< 音频总时长
-    float m_compressionPower;                ///< 频谱压缩强度（0.05-1.0）
-    bool m_seeking;                          ///< 是否正在拖动进度条
+    AudioEngine* m_audioEngine;
+    FFTAnalyzer m_fftAnalyzer;
+    QStackedWidget* m_visStack;
+    BarSpectrumVisualizer* m_barWidget;
+    CircularSpectrumVisualizer* m_circularWidget;
+    WaveformVisualizer* m_waveformWidget;
+    WaterfallVisualizer* m_waterfallWidget;
+    GLSpectrumWidget* m_glWidget;
+    AudioEffectWidget* m_audioEffectWidget;
+    AudioEffectProcessor* m_effectProcessor;
+    QPushButton* m_playPauseBtn;
+    QPushButton* m_backBtn;
+    QPushButton* m_fxBtn;               ///< FX 特效开关按钮
+    QSlider* m_positionSlider;
+    QSlider* m_volumeSlider;
+    QSlider* m_compressionSlider;
+    QLabel* m_compressionLabel;
+    QComboBox* m_fftSizeCombo;
+    QComboBox* m_visModeCombo;
+    QLabel* m_timeLabel;
+    QTimer* m_renderTimer;
+    qint64 m_durationMs;
+    float m_compressionPower;
+    bool m_seeking;
+    bool m_effectsActive = false;    ///< 音频特效是否已激活
 };

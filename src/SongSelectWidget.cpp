@@ -357,36 +357,28 @@ void SongSelectWidget::loadFromCache(const QString& filePath, float bpm, qint64 
 void SongSelectWidget::showLoadingState()
 {
     // 创建一个独立的加载对话框（非模态，避免阻塞）
+    // 注意：主线程随后会被 loadFile() 阻塞，所以不使用需要事件循环的动画组件
     QDialog* dlg = new QDialog(this);
     dlg->setWindowTitle(QStringLiteral("加载中"));
-    dlg->setFixedSize(200, 120);
+    dlg->setFixedSize(200, 100);
     dlg->setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
     dlg->setStyleSheet("QDialog { background-color: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; }");
     dlg->setAttribute(Qt::WA_DeleteOnClose);
 
     QVBoxLayout* layout = new QVBoxLayout(dlg);
     layout->setAlignment(Qt::AlignCenter);
-    layout->setSpacing(12);
-
-    SpinnerWidget* spinner = new SpinnerWidget(dlg);
-    spinner->setFixedSize(36, 36);
-    QHBoxLayout* spinLayout = new QHBoxLayout();
-    spinLayout->setAlignment(Qt::AlignCenter);
-    spinLayout->addWidget(spinner);
-    layout->addLayout(spinLayout);
+    layout->setSpacing(8);
 
     QLabel* label = new QLabel(QStringLiteral("加载中..."), dlg);
     label->setAlignment(Qt::AlignCenter);
-    label->setStyleSheet("color: #00ff88; font-size: 14px; background: transparent;");
+    label->setStyleSheet("color: #00ff88; font-size: 16px; font-weight: bold; background: transparent;");
     layout->addWidget(label);
-
-    spinner->start();
 
     dlg->show();
     dlg->raise();
 
     // 存储指针供 hideLoadingState 使用
-    m_spinner = nullptr;  // 不再用原来的 spinner
+    m_spinner = nullptr;
     m_spinnerDialog = dlg;
 
     // 禁用底层交互

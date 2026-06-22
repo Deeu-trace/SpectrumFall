@@ -1,10 +1,14 @@
 #include "AudioEngine.h"
+#include "AudioEffectProcessor.h"
 #include <QFile>
 #include <QUrl>
 #include <QDebug>
 #include <QThread>
 #include <cstring>
 #include <QDataStream>
+#include <QDir>
+#include <QAudioFormat>
+#include <QTimer>
 
 // dr_mp3 实现（只在一个 .cpp 中定义）
 #define DR_MP3_IMPLEMENTATION
@@ -89,22 +93,53 @@ bool AudioEngine::loadFile(const QString& path)
 
 void AudioEngine::play()
 {
-    m_player->play();
+    if (m_realtimeActive && m_realtimeSink) {
+        m_realtimeSink->resume();
+        if (m_realtimeDevice) m_realtimeDevice->resumeClock();
+    } else {
+        m_player->play();
+    }
 }
 
 void AudioEngine::pause()
 {
-    m_player->pause();
+    if (m_realtimeActive && m_realtimeSink) {
+        m_realtimeSink->suspend();
+        if (m_realtimeDevice) m_realtimeDevice->pauseClock();
+    } else {
+        m_player->pause();
+    }
 }
 
 void AudioEngine::seek(qint64 ms)
 {
     m_player->setPosition(ms);
+
+    if (m_realtimeActive && m_realtimeSink && m_realtimeDevice) {
+        bool wasPlaying = isRealtimePlaying();
+
+        // 停 sink 清缓冲
+        m_realtimeSink->stop();
+
+        // 直接定位（不需要 close/open，seekTo 只改 m_readPos）
+        m_realtimeDevice->seekTo(ms * m_sampleRate / 1000);
+
+        // 重启 sink
+        m_realtimeSink->start(m_realtimeDevice);
+
+        if (!wasPlaying) {
+            m_realtimeSink->suspend();
+            m_realtimeDevice->pauseClock();
+        }
+    }
 }
 
 void AudioEngine::setVolume(float vol)
 {
-    m_audioOutput->setVolume(qBound(0.0f, vol, 1.0f));
+    float v = qBound(0.0f, vol, 1.0f);
+    m_audioOutput->setVolume(v);
+    if (m_realtimeSink)
+        m_realtimeSink->setVolume(v);
 }
 
 void AudioEngine::setPlaybackRate(qreal rate)
@@ -119,6 +154,9 @@ QMediaPlayer::PlaybackState AudioEngine::state() const
 
 qint64 AudioEngine::position() const
 {
+    if (m_realtimeActive && m_realtimeDevice) {
+        return m_realtimeDevice->positionMs();
+    }
     return m_player->position();
 }
 
@@ -168,6 +206,52 @@ QVector<float> AudioEngine::getWindowAt(qint64 ms, int windowSize) const
 bool AudioEngine::isLoaded() const
 {
     return m_loaded;
+}
+
+bool AudioEngine::loadProcessedAudio(const QVector<float>& processedPcm)
+{
+    if (processedPcm.isEmpty() || m_sampleRate <= 0) return false;
+
+    // 写入临时 WAV 文件
+    QString tempPath = QDir::tempPath() + QStringLiteral("/spectrumfall_processed.wav");
+
+    QFile file(tempPath);
+    if (!file.open(QIODevice::WriteOnly)) return false;
+
+    QDataStream ds(&file);
+    ds.setByteOrder(QDataStream::LittleEndian);
+
+    int numSamples = processedPcm.size();
+    int dataSize = numSamples * 2;
+    int fileSize = 36 + dataSize;
+
+    ds.writeRawData("RIFF", 4);
+    ds << fileSize;
+    ds.writeRawData("WAVE", 4);
+    ds.writeRawData("fmt ", 4);
+    ds << static_cast<qint32>(16);
+    ds << static_cast<qint16>(1);
+    ds << static_cast<qint16>(1);
+    ds << static_cast<qint32>(m_sampleRate);
+    ds << static_cast<qint32>(m_sampleRate * 2);
+    ds << static_cast<qint16>(2);
+    ds << static_cast<qint16>(16);
+    ds.writeRawData("data", 4);
+    ds << dataSize;
+
+    for (int i = 0; i < numSamples; ++i) {
+        float val = qBound(-1.0f, processedPcm[i], 1.0f);
+        ds << static_cast<qint16>(val * 32767.0f);
+    }
+    file.close();
+
+    // 更新时长
+    m_durationMs = static_cast<qint64>(numSamples) * 1000 / m_sampleRate;
+
+    // 切换 QMediaPlayer 播放源
+    m_player->setSource(QUrl::fromLocalFile(tempPath));
+
+    return true;
 }
 
 bool AudioEngine::parseWav(const QString& path)
@@ -529,4 +613,163 @@ bool AudioEngine::parseFlac(const QString& path)
              << "frames:" << totalFrames;
 
     return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AudioOutputDevice
+// ═══════════════════════════════════════════════════════════════
+
+AudioOutputDevice::AudioOutputDevice(QObject* parent)
+    : QIODevice(parent) {}
+
+void AudioOutputDevice::setSource(const float* data, qint64 totalSamples, int sr)
+{
+    m_pcmData = data; m_totalSamples = totalSamples; m_sampleRate = sr; m_readPos = 0;
+    m_clockOffsetMs = 0;
+    m_clockRunning = false;
+}
+
+void AudioOutputDevice::seekTo(qint64 pos)
+{
+    m_readPos = qBound<qint64>(0, pos, m_totalSamples);
+    m_clockOffsetMs = m_readPos * 1000 / m_sampleRate;
+    m_playClock.restart();
+    m_clockRunning = true;
+}
+
+qint64 AudioOutputDevice::positionMs() const
+{
+    if (!m_clockRunning) return m_clockOffsetMs;
+    return m_clockOffsetMs + m_playClock.elapsed();
+}
+
+void AudioOutputDevice::pauseClock()
+{
+    if (m_clockRunning) {
+        m_clockOffsetMs += m_playClock.elapsed();
+        m_clockRunning = false;
+    }
+}
+
+void AudioOutputDevice::resumeClock()
+{
+    m_playClock.restart();
+    m_clockRunning = true;
+}
+
+qint64 AudioOutputDevice::bytesAvailable() const
+{
+    qint64 remaining = (m_totalSamples - m_readPos) * 2;
+    return qMax<qint64>(remaining, 0);
+}
+
+// seek() 重写已删除 — QIODevice::open() 内部调 seek(0) 会把 m_readPos 归零
+// 用 seekTo() 直接设置 m_readPos 即可
+
+qint64 AudioOutputDevice::readData(char* data, qint64 maxSize)
+{
+    if (!m_pcmData || m_readPos >= m_totalSamples) {
+        memset(data, 0, static_cast<size_t>(maxSize));
+        return maxSize;
+    }
+    qint64 nSamples = maxSize / 2;
+    qint64 avail = m_totalSamples - m_readPos;
+    if (nSamples > avail) nSamples = avail;
+    qint16* out = reinterpret_cast<qint16*>(data);
+    if (m_effectProc && m_effectProc->effectType() != AudioEffectType::None) {
+        m_effectProc->processChunk(m_pcmData + m_readPos, out, static_cast<int>(nSamples));
+    } else {
+        for (qint64 i = 0; i < nSamples; ++i) {
+            float s = m_pcmData[m_readPos + i];
+            out[i] = static_cast<qint16>(qBound(-1.0f, s, 1.0f) * 32767.0f);
+        }
+    }
+    m_readPos += nSamples;
+    if (nSamples * 2 < maxSize) memset(data + nSamples * 2, 0, static_cast<size_t>(maxSize - nSamples * 2));
+    return maxSize;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AudioEngine 实时播放
+// ═══════════════════════════════════════════════════════════════
+
+void AudioEngine::startRealtimePlayback(AudioEffectProcessor* effectProc)
+{
+    stopRealtimePlayback();
+    if (m_pcmBuffer.isEmpty() || m_sampleRate <= 0) return;
+
+    // 暂停 QMediaPlayer，避免两个音频源同时播放
+    qint64 currentPlayerMs = m_player->position();
+    bool wasPlayerPlaying = (m_player->playbackState() == QMediaPlayer::PlayingState);
+    if (wasPlayerPlaying) {
+        m_player->pause();
+    }
+
+    QAudioFormat fmt;
+    fmt.setSampleRate(m_sampleRate);
+    fmt.setChannelCount(1);
+    fmt.setSampleFormat(QAudioFormat::Int16);
+
+    m_realtimeSink = new QAudioSink(fmt, this);
+    if (m_realtimeSink->error() != QAudio::NoError) {
+        qWarning() << "AudioEngine: QAudioSink init error:" << m_realtimeSink->error();
+        delete m_realtimeSink;
+        m_realtimeSink = nullptr;
+        if (wasPlayerPlaying) m_player->play();
+        return;
+    }
+
+    m_realtimeSink->setBufferSize(80 * m_sampleRate * 2 / 1000);
+    m_realtimeSink->setVolume(m_audioOutput ? m_audioOutput->volume() : 0.8f);
+    m_realtimeDevice = new AudioOutputDevice(this);
+    m_realtimeDevice->setSource(m_pcmBuffer.constData(), m_pcmBuffer.size(), m_sampleRate);
+    m_realtimeDevice->setEffectProcessor(effectProc);
+
+    // open 必须在 start 之前
+    m_realtimeDevice->open(QIODevice::ReadOnly);
+
+    // 同步到当前播放位置（在 open 之后，因为 open 会重置 QIODevice 内部位置）
+    qint64 startSample = currentPlayerMs * m_sampleRate / 1000;
+    m_realtimeDevice->seekTo(startSample);
+
+    m_realtimeSink->start(m_realtimeDevice);
+
+    if (m_realtimeSink->error() != QAudio::NoError) {
+        qWarning() << "AudioEngine: QAudioSink error after start:" << m_realtimeSink->error();
+    }
+
+    m_realtimeActive = true;
+
+    // 位置更新定时器（降低频率，渲染定时器已在更新 UI）
+    m_realtimeTimer = new QTimer(this);
+    connect(m_realtimeTimer, &QTimer::timeout, this, &AudioEngine::onRealtimePositionUpdate);
+    m_realtimeTimer->start(200);
+
+    qDebug() << "AudioEngine: realtime playback started at" << currentPlayerMs << "ms"
+             << "sample:" << startSample << "/" << m_pcmBuffer.size();
+}
+
+void AudioEngine::stopRealtimePlayback()
+{
+    if (!m_realtimeActive) return;
+
+    // 保存实时播放位置，同步回 QMediaPlayer
+    qint64 currentSample = m_realtimeDevice ? m_realtimeDevice->currentSample() : 0;
+    qint64 currentMs = currentSample * 1000 / m_sampleRate;
+
+    m_realtimeActive = false;
+    if (m_realtimeTimer) { m_realtimeTimer->stop(); delete m_realtimeTimer; m_realtimeTimer = nullptr; }
+    if (m_realtimeSink)  { m_realtimeSink->stop(); delete m_realtimeSink; m_realtimeSink = nullptr; }
+    if (m_realtimeDevice) { m_realtimeDevice->close(); delete m_realtimeDevice; m_realtimeDevice = nullptr; }
+
+    // 同步 QMediaPlayer 到实时播放停止的位置
+    if (currentMs > 0) {
+        m_player->setPosition(currentMs);
+    }
+}
+
+void AudioEngine::onRealtimePositionUpdate()
+{
+    if (m_realtimeDevice && m_realtimeActive)
+        emit positionChanged(m_realtimeDevice->currentSample() * 1000 / m_sampleRate);
 }

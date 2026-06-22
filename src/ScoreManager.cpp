@@ -50,6 +50,37 @@ int ScoreManager::judgeHit(qint64 hitTimeMs, qint64 noteTimeMs)
     }
 }
 
+int ScoreManager::checkHit(qint64 hitTimeMs, qint64 noteTimeMs) const
+{
+    qint64 delta = qAbs(hitTimeMs - noteTimeMs);
+
+    if (delta <= PERFECT_WINDOW) {
+        return 1; // Perfect
+    } else if (delta <= GOOD_WINDOW) {
+        return 2; // Good
+    } else {
+        return 3; // Miss
+    }
+}
+
+void ScoreManager::scoreHoldComplete(int headResult)
+{
+    if (headResult == 1) {
+        m_score += PERFECT_SCORE;
+        m_combo++;
+        m_perfectCount++;
+    } else if (headResult == 2) {
+        m_score += GOOD_SCORE;
+        m_combo++;
+        m_goodCount++;
+    } else {
+        return; // Miss 不加分
+    }
+    if (m_combo > m_maxCombo) m_maxCombo = m_combo;
+    emit scoreChanged(m_score);
+    emit comboChanged(m_combo);
+}
+
 void ScoreManager::addMiss()
 {
     m_missCount++;

@@ -66,6 +66,9 @@
     <QtMoc Include="include\ScoreManager.h">
       <Filter>Header Files</Filter>
     </QtMoc>
+    <QtMoc Include="include\AudioEffectWidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -117,6 +120,18 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\ScoreManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CacheManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GLSpectrumWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\AudioEffectProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\AudioEffectWidget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
