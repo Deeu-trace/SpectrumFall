@@ -11,8 +11,6 @@
 class AudioEngine;
 class ScoreManager;
 class QPushButton;
-class QSlider;
-class QLabel;
 
 /// 命中特效粒子
 struct HitParticle {
@@ -79,8 +77,8 @@ private slots:
 private:
     void setupPauseOverlay();          ///< 创建暂停菜单遮罩
 
-    /// 根据当前密度设置过滤音符列表
-    void applyDensityFilter();
+    /// 测试用：跳转到歌曲结束前 10 秒（静默跳过之前的音符，不计 Miss）
+    void skipToEndTest();
 
     /// 将同轨道间距相近的 Tap 音符合并为 Hold 音符
     void mergeHolds();
@@ -97,9 +95,7 @@ private:
     QMap<int, int> m_activeHolds;      ///< 活跃 Hold：lane → m_notes 索引
     bool m_paused;                     ///< 是否暂停
     bool m_gameActive;                 ///< 游戏是否活跃
-    int m_minGapMs;                    ///< 同轨道音符最小间隔（毫秒）
-    int m_globalMinGapMs;              ///< 跨轨道全局最小间隔（毫秒）
-    bool m_densityChanged;             ///< 密度是否被修改过
+    bool m_audioStarted;               ///< 音频是否已启动（倒计时结束后置 true）
 
     // 精确计时
     QElapsedTimer m_gameClock;         ///< 游戏高精度时钟
@@ -135,10 +131,7 @@ private:
     QWidget* m_pauseOverlay;           ///< 暂停遮罩
     QPushButton* m_continueBtn;        ///< 继续游戏按钮
     QPushButton* m_backToMenuBtn;      ///< 返回主菜单按钮
-    QSlider* m_densitySlider;          ///< 同轨道密度滑块
-    QLabel* m_densityLabel;            ///< 同轨道密度值显示
-    QSlider* m_globalGapSlider;        ///< 跨轨道全局间隔滑块
-    QLabel* m_globalGapLabel;          ///< 跨轨道全局间隔值显示
+    QPushButton* m_testSkipBtn;        ///< 测试按钮：跳到结尾前10秒
 
     /// 获取精确的当前游戏时间（毫秒），基于高精度时钟
     qint64 getGameTime() const;

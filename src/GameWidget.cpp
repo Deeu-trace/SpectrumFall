@@ -6,11 +6,8 @@
 #include <QPaintEvent>
 #include <QKeyEvent>
 #include <QPushButton>
-#include <QSlider>
-#include <QLabel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QFrame>
 #include <QApplication>
 #include <QDateTime>
 #include <QtMath>
@@ -23,21 +20,13 @@
 static constexpr qreal SCROLL_SPEED = 0.35;     // 像素/毫秒（下落速度，降低让玩家有更多反应时间）
 static constexpr qint64 VISIBLE_AHEAD = 3000;   // 提前 3 秒显示音符
 static constexpr qint64 MISS_THRESHOLD = 300;   // 超过 300ms 视为 Miss（音符过了判定线后的容许窗口）
-static constexpr int DEFAULT_MIN_GAP_MS = 500;   // 默认同轨道最小间隔 500ms（适中密度）
-static constexpr int MIN_GAP_MS = 150;          // 同轨道滑块最小值
-static constexpr int MAX_GAP_MS = 1000;         // 同轨道滑块最大值
-static constexpr int GAP_STEP_MS = 50;          // 滑块步进
-
-// 跨轨道全局间隔（防止不同轨道音符挤成一团）
-static constexpr int DEFAULT_GLOBAL_MIN_GAP_MS = 200;  // 默认跨轨道最小间隔 200ms（适中）
-static constexpr int GLOBAL_MIN_GAP_MS = 100;          // 全局滑块最小值
-static constexpr int GLOBAL_MAX_GAP_MS = 800;          // 全局滑块最大值
-static constexpr int GLOBAL_GAP_STEP_MS = 50;          // 全局滑块步进
 
 // Hold 合并阈值：同轨道相邻音符间距 ≤ 此值时合并为长条
 // 6 键模式音符更分散，阈值更大才能产生足够 Hold
 static constexpr qint64 HOLD_MERGE_THRESHOLD_4K = 500;
 static constexpr qint64 HOLD_MERGE_THRESHOLD_6K = 800;
+static constexpr qint64 HOLD_MAX_DURATION = 2000;   // Hold 最长 2 秒，防止过长
+static constexpr qint64 COUNTDOWN_MS = 3000;        // 开场 3 秒倒计时，音频延迟播放
 
 static float randFloat() {
     // 使用 C++ 标准库的随机数生成替代 qrand
@@ -53,9 +42,7 @@ GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWi
     , m_renderTimer(new QTimer(this))
     , m_paused(false)
     , m_gameActive(false)
-    , m_minGapMs(DEFAULT_MIN_GAP_MS)
-    , m_globalMinGapMs(DEFAULT_GLOBAL_MIN_GAP_MS)
-    , m_densityChanged(false)
+    , m_audioStarted(false)
     , m_judgeTextTimer(0)
     , m_judgeLineY(0.85)
     , m_noteSpeed(SCROLL_SPEED)
@@ -90,6 +77,19 @@ GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWi
 
     generateStars();
     setupPauseOverlay();
+
+    // 测试按钮：跳转到歌曲结束前 10 秒（便于快速测试结算/排行榜流程）
+    m_testSkipBtn = new QPushButton(QStringLiteral("测试：跳到结尾"), this);
+    m_testSkipBtn->setObjectName("testSkipBtn");
+    m_testSkipBtn->setFocusPolicy(Qt::NoFocus);   // 不抢游戏键盘焦点
+    m_testSkipBtn->setCursor(Qt::PointingHandCursor);
+    m_testSkipBtn->setStyleSheet(
+        "QPushButton { color: #ffe066; background-color: rgba(20,20,40,210); "
+        "border: 1px solid #555; border-radius: 6px; padding: 2px 10px; font-size: 12px; }"
+        "QPushButton:hover { color: #ffffff; border-color: #00ff88; background-color: rgba(0,80,40,210); }");
+    m_testSkipBtn->setGeometry(width() - 140, 6, 130, 26);
+    m_testSkipBtn->hide();
+    connect(m_testSkipBtn, &QPushButton::clicked, this, &GameWidget::skipToEndTest);
 }
 
 void GameWidget::generateStars()
@@ -143,117 +143,6 @@ void GameWidget::setupPauseOverlay()
     mainLayout->setAlignment(Qt::AlignCenter);
     mainLayout->setSpacing(16);
 
-    // ── 密度调节区域 ──
-    QWidget* densityPanel = new QWidget(m_pauseOverlay);
-    densityPanel->setObjectName("controlPanel");
-    QVBoxLayout* densityLayout = new QVBoxLayout(densityPanel);
-    densityLayout->setAlignment(Qt::AlignCenter);
-    densityLayout->setSpacing(8);
-
-    // 标题
-    QLabel* densityTitle = new QLabel(QStringLiteral("音符密度调节"), densityPanel);
-    densityTitle->setAlignment(Qt::AlignCenter);
-    densityTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #00ff88; background: transparent;");
-    densityLayout->addWidget(densityTitle);
-
-    // 副标题
-    QLabel* densityHint = new QLabel(QStringLiteral("调整后点击「继续游戏」将从头开始"), densityPanel);
-    densityHint->setAlignment(Qt::AlignCenter);
-    densityHint->setStyleSheet("font-size: 12px; color: #8888aa; background: transparent;");
-    densityLayout->addWidget(densityHint);
-
-    // ── 滑块 1: 同轨道间隔 ──
-    QLabel* laneGapTitle = new QLabel(QStringLiteral("同轨道最小间隔"), densityPanel);
-    laneGapTitle->setAlignment(Qt::AlignCenter);
-    laneGapTitle->setStyleSheet("font-size: 13px; color: #bd93f9; background: transparent;");
-    densityLayout->addWidget(laneGapTitle);
-
-    // 滑块行
-    QHBoxLayout* sliderRow = new QHBoxLayout();
-    sliderRow->setSpacing(10);
-
-    QLabel* sparseLabel = new QLabel(QStringLiteral("密集"), densityPanel);
-    sparseLabel->setStyleSheet("font-size: 13px; color: #bd93f9; background: transparent;");
-    sliderRow->addWidget(sparseLabel);
-
-    m_densitySlider = new QSlider(Qt::Horizontal, densityPanel);
-    m_densitySlider->setMinimum(MIN_GAP_MS);
-    m_densitySlider->setMaximum(MAX_GAP_MS);
-    m_densitySlider->setSingleStep(GAP_STEP_MS);
-    m_densitySlider->setPageStep(GAP_STEP_MS * 2);
-    m_densitySlider->setValue(m_minGapMs);
-    m_densitySlider->setMinimumWidth(200);
-    m_densitySlider->setObjectName("densitySlider");
-    sliderRow->addWidget(m_densitySlider);
-
-    QLabel* wideLabel = new QLabel(QStringLiteral("稀疏"), densityPanel);
-    wideLabel->setStyleSheet("font-size: 13px; color: #bd93f9; background: transparent;");
-    sliderRow->addWidget(wideLabel);
-
-    densityLayout->addLayout(sliderRow);
-
-    // 数值显示
-    m_densityLabel = new QLabel(QStringLiteral("%1ms").arg(m_minGapMs), densityPanel);
-    m_densityLabel->setAlignment(Qt::AlignCenter);
-    m_densityLabel->setStyleSheet("font-size: 14px; color: #e0e0e0; background: transparent;");
-    densityLayout->addWidget(m_densityLabel);
-
-    // 分隔线
-    QFrame* separator = new QFrame(densityPanel);
-    separator->setFrameShape(QFrame::HLine);
-    separator->setStyleSheet("color: #0f3460; background-color: #0f3460; max-height: 1px;");
-    densityLayout->addWidget(separator);
-
-    // ── 滑块 2: 跨轨道全局间隔 ──
-    QLabel* globalGapTitle = new QLabel(QStringLiteral("跨轨道最小间隔"), densityPanel);
-    globalGapTitle->setAlignment(Qt::AlignCenter);
-    globalGapTitle->setStyleSheet("font-size: 13px; color: #8be9fd; background: transparent;");
-    densityLayout->addWidget(globalGapTitle);
-
-    // 全局滑块行
-    QHBoxLayout* globalSliderRow = new QHBoxLayout();
-    globalSliderRow->setSpacing(10);
-
-    QLabel* gSparseLabel = new QLabel(QStringLiteral("密集"), densityPanel);
-    gSparseLabel->setStyleSheet("font-size: 13px; color: #8be9fd; background: transparent;");
-    globalSliderRow->addWidget(gSparseLabel);
-
-    m_globalGapSlider = new QSlider(Qt::Horizontal, densityPanel);
-    m_globalGapSlider->setMinimum(GLOBAL_MIN_GAP_MS);
-    m_globalGapSlider->setMaximum(GLOBAL_MAX_GAP_MS);
-    m_globalGapSlider->setSingleStep(GLOBAL_GAP_STEP_MS);
-    m_globalGapSlider->setPageStep(GLOBAL_GAP_STEP_MS * 2);
-    m_globalGapSlider->setValue(m_globalMinGapMs);
-    m_globalGapSlider->setMinimumWidth(200);
-    m_globalGapSlider->setObjectName("globalGapSlider");
-    globalSliderRow->addWidget(m_globalGapSlider);
-
-    QLabel* gWideLabel = new QLabel(QStringLiteral("稀疏"), densityPanel);
-    gWideLabel->setStyleSheet("font-size: 13px; color: #8be9fd; background: transparent;");
-    globalSliderRow->addWidget(gWideLabel);
-
-    densityLayout->addLayout(globalSliderRow);
-
-    // 全局数值显示
-    m_globalGapLabel = new QLabel(QStringLiteral("%1ms").arg(m_globalMinGapMs), densityPanel);
-    m_globalGapLabel->setAlignment(Qt::AlignCenter);
-    m_globalGapLabel->setStyleSheet("font-size: 14px; color: #e0e0e0; background: transparent;");
-    densityLayout->addWidget(m_globalGapLabel);
-
-    mainLayout->addWidget(densityPanel);
-
-    // 同轨道滑块变化事件
-    connect(m_densitySlider, &QSlider::valueChanged, this, [this](int value) {
-        m_densityLabel->setText(QStringLiteral("%1ms").arg(value));
-        m_densityChanged = true;
-    });
-
-    // 全局滑块变化事件
-    connect(m_globalGapSlider, &QSlider::valueChanged, this, [this](int value) {
-        m_globalGapLabel->setText(QStringLiteral("%1ms").arg(value));
-        m_densityChanged = true;
-    });
-
     // ── 按钮区域 ──
     QVBoxLayout* btnLayout = new QVBoxLayout();
     btnLayout->setAlignment(Qt::AlignCenter);
@@ -275,43 +164,8 @@ void GameWidget::setupPauseOverlay()
 
     // 继续游戏
     connect(m_continueBtn, &QPushButton::clicked, this, [this]() {
-        int newLaneGap = m_densitySlider->value();
-        int newGlobalGap = m_globalGapSlider->value();
-
-        if (m_densityChanged) {
-            // 密度被修改 → 重新过滤音符并重新开始
-            m_minGapMs = newLaneGap;
-            m_globalMinGapMs = newGlobalGap;
-            m_activeHolds.clear();
-            applyDensityFilter();
-            m_densityChanged = false;
-
-            // 重新开始当前歌曲（保留密度设置）
-            m_paused = false;
-            m_gameActive = true;
-            m_judgeTextTimer = 0;
-            m_judgeText.clear();
-            m_startPosMs = 0;
-            m_pauseElapsedMs = 0;
-            m_totalPausedMs = 0;
-
-            if (m_scoreManager) {
-                m_scoreManager->reset();
-            }
-
-            m_gameClock.restart();
-            m_pauseOverlay->hide();
-            setFocus();
-
-            if (m_audioEngine) {
-                m_audioEngine->seek(0);
-                m_audioEngine->play();
-            }
-        } else {
-            // 密度未修改 → 正常恢复
-            resumeGame();
-            m_pauseOverlay->hide();
-        }
+        resumeGame();
+        m_pauseOverlay->hide();
     });
 
     // 返回主菜单
@@ -320,106 +174,64 @@ void GameWidget::setupPauseOverlay()
         m_renderTimer->stop();
         m_pauseOverlay->hide();
         m_audioEngine->pause();
+        if (m_testSkipBtn) m_testSkipBtn->hide();
         emit backRequested();
     });
 }
 
-void GameWidget::applyDensityFilter()
-{
-    // 从原始音符列表中，按双重间隔过滤：
-    // 1) 同轨道最小间隔 m_minGapMs —— 防止同一轨道连打太快
-    // 2) 跨轨道全局最小间隔 m_globalMinGapMs —— 防止不同轨道音符挤成一团
-    m_notes.clear();
-
-    // 每个轨道独立追踪最近时间戳
-    QVector<qint64> lastTimestampPerLane(m_laneCount, -m_minGapMs);
-    // 全局最近时间戳（任何轨道产生音符后都更新）
-    qint64 lastGlobalTimestamp = -m_globalMinGapMs;
-
-    for (const GameNote& note : m_allNotes) {
-        int lane = note.lane;
-        if (lane < 0 || lane >= m_laneCount) lane = 1;
-
-        // 检查 1: 同轨道间隔
-        if (note.timestampMs - lastTimestampPerLane[lane] < m_minGapMs) {
-            continue;
-        }
-
-        // 检查 2: 跨轨道全局间隔
-        if (note.timestampMs - lastGlobalTimestamp < m_globalMinGapMs) {
-            continue;
-        }
-
-        m_notes.append(note);
-        lastTimestampPerLane[lane] = note.timestampMs;
-        lastGlobalTimestamp = note.timestampMs;
-    }
-
-    // 将密集的同轨道音符合并为 Hold 长条
-    mergeHolds();
-}
-
 void GameWidget::mergeHolds()
 {
-    // 根据轨道数选择合并阈值
-    qint64 holdThreshold = (m_laneCount == 6) ? HOLD_MERGE_THRESHOLD_6K : HOLD_MERGE_THRESHOLD_4K;
+    // NoteGenerator 已按 200ms 间隔过滤，不再做同轨合并
+    // （旧的同轨合并用 500/800ms 阈值会把密集的 200ms 间距音符全部吞成超长 Hold）
+    // Hold 音符仅通过以下策略主动生成
 
-    // 按轨道分组，记录每条轨道上的音符在 m_notes 中的索引
-    QMap<int, QVector<int>> laneIndices;
-    for (int i = 0; i < m_notes.size(); ++i) {
-        laneIndices[m_notes[i].lane].append(i);
-    }
-
-    // 标记被合并掉的音符
-    QVector<bool> consumed(m_notes.size(), false);
-    QVector<GameNote> holdNotes;
-
-    for (auto it = laneIndices.begin(); it != laneIndices.end(); ++it) {
-        const QVector<int>& indices = it.value();
-
-        for (int j = 0; j < indices.size(); ++j) {
-            if (consumed[indices[j]]) continue;
-
-            int startIdx = indices[j];
-            qint64 startTime = m_notes[startIdx].timestampMs;
-            qint64 endTime = startTime;
-
-            // 尝试与后续同轨道音符合并
-            int k = j + 1;
-            while (k < indices.size()) {
-                qint64 nextTime = m_notes[indices[k]].timestampMs;
-                if (nextTime - endTime <= holdThreshold) {
-                    endTime = nextTime;
-                    consumed[indices[k]] = true;
-                    k++;
-                } else {
-                    break;
-                }
-            }
-
-            if (endTime > startTime) {
-                // 合并为 Hold 音符
-                holdNotes.append(GameNote(startTime, it.key(), HOLD, endTime - startTime));
-                consumed[startIdx] = true;
-            }
-        }
-    }
-
-    // 收集未被合并的 Tap 音符 + 新生成的 Hold 音符
-    QVector<GameNote> result;
-    for (int i = 0; i < m_notes.size(); ++i) {
-        if (!consumed[i]) {
-            result.append(m_notes[i]);
-        }
-    }
-    for (const GameNote& hn : holdNotes) {
-        result.append(hn);
-    }
-
-    // 按时间戳排序
+    QVector<GameNote> result = m_notes;
     std::sort(result.begin(), result.end(), [](const GameNote& a, const GameNote& b) {
         return a.timestampMs < b.timestampMs;
     });
+
+    // ── Step 2: 估算音符间中位间隔（反映节拍粒度）──
+    QVector<qint64> gaps;
+    for (int i = 1; i < result.size(); ++i) {
+        gaps.append(result[i].timestampMs - result[i - 1].timestampMs);
+    }
+    qint64 medianGap = 500;  // 回退默认值
+    if (!gaps.isEmpty()) {
+        std::sort(gaps.begin(), gaps.end());
+        medianGap = gaps[gaps.size() / 2];
+    }
+
+    // ── Step 3: 基于停顿的 Hold 生成（减半频率：只转换奇数个符合条件的 Tap）──
+    // Tap 后面跟一个较长间隔（2~6 倍中位间隔）→ 这里有个"停顿"，
+    // 把这个 Tap 转成 Hold 来填充视觉空白，holdDurationMs = gap * 0.4
+    int pauseConvertCount = 0;
+    for (int i = 0; i < result.size() - 1; ++i) {
+        if (result[i].noteType != TAP) continue;
+        qint64 gap = result[i + 1].timestampMs - result[i].timestampMs;
+        if (gap > 2 * medianGap && gap < 6 * medianGap) {
+            if (++pauseConvertCount % 2 == 0) continue;  // 跳过一半，降低频率
+            result[i].noteType = HOLD;
+            result[i].holdDurationMs = qMin(static_cast<qint64>(gap * 0.4), HOLD_MAX_DURATION);
+        }
+    }
+
+    // ── Step 4: 最低 Hold 比例保障（≥5%）──
+    // 如果 Hold 仍不足总数的 5%，每隔 14 个 Tap 转一个为短 Hold
+    int holdCount = 0;
+    for (const GameNote& n : result) {
+        if (n.noteType == HOLD) ++holdCount;
+    }
+    if (!result.isEmpty() && holdCount * 20 < result.size()) {
+        int tapIndex = 0;
+        for (int i = 0; i < result.size(); ++i) {
+            if (result[i].noteType != TAP) continue;
+            ++tapIndex;
+            if (tapIndex % 14 == 0) {
+                result[i].noteType = HOLD;
+                result[i].holdDurationMs = qMin(static_cast<qint64>(medianGap * 0.75), HOLD_MAX_DURATION);
+            }
+        }
+    }
 
     m_notes = result;
 }
@@ -428,32 +240,33 @@ void GameWidget::startGame(const QVector<GameNote>& notes, int laneCount)
 {
     m_laneCount = qBound(4, laneCount, 6);
     m_allNotes = notes;
-    m_minGapMs = DEFAULT_MIN_GAP_MS;
-    m_globalMinGapMs = DEFAULT_GLOBAL_MIN_GAP_MS;
-    m_densityChanged = false;
 
-    // 重置滑块到默认值
-    if (m_densitySlider) {
-        m_densitySlider->setValue(DEFAULT_MIN_GAP_MS);
-    }
-    if (m_densityLabel) {
-        m_densityLabel->setText(QStringLiteral("%1ms").arg(DEFAULT_MIN_GAP_MS));
-    }
-    if (m_globalGapSlider) {
-        m_globalGapSlider->setValue(DEFAULT_GLOBAL_MIN_GAP_MS);
-    }
-    if (m_globalGapLabel) {
-        m_globalGapLabel->setText(QStringLiteral("%1ms").arg(DEFAULT_GLOBAL_MIN_GAP_MS));
-    }
+    // 直接使用 NoteGenerator 输出，不再做密度过滤
+    m_notes = m_allNotes;
+    mergeHolds();
 
-    // 应用密度过滤
-    applyDensityFilter();
+    // 降低 TAP 音符频率到一半（不影响 HOLD）
+    // mergeHolds 已在完整音符集上完成 HOLD 生成，此处仅剔除一半 TAP
+    QVector<GameNote> thinned;
+    int tapIndex = 0;
+    for (const GameNote& note : m_notes) {
+        if (note.noteType == HOLD) {
+            thinned.append(note);          // HOLD 全部保留
+        } else {
+            if (tapIndex % 2 == 0) {
+                thinned.append(note);      // TAP 只保留一半
+            }
+            ++tapIndex;
+        }
+    }
+    m_notes = thinned;
 
     m_paused = false;
     m_gameActive = true;
+    m_audioStarted = false;
     m_judgeTextTimer = 0;
     m_judgeText.clear();
-    m_startPosMs = 0;
+    m_startPosMs = -COUNTDOWN_MS;   // 负偏移：game time 从 -3000 开始，给音符从顶部下落的时间
     m_pauseElapsedMs = 0;
     m_totalPausedMs = 0;
     m_judgeLinePulse = 0.0;
@@ -471,27 +284,63 @@ void GameWidget::startGame(const QVector<GameNote>& notes, int laneCount)
         m_scoreManager->reset();
     }
 
-    // 启动高精度游戏时钟
+    // 立即启动游戏时钟（game time 从 -COUNTDOWN_MS 开始）
+    // 音频在 game time 达到 0 时启动（见 onRenderTick）
     m_gameClock.start();
-
     setFocus();
     m_renderTimer->start();
 
     // 预建背景缓存
     rebuildBackground();
 
-    if (m_audioEngine) {
-        m_audioEngine->seek(0);
-        m_audioEngine->play();
+    // 显示测试按钮
+    if (m_testSkipBtn) {
+        m_testSkipBtn->show();
+        m_testSkipBtn->raise();
     }
+}
+
+void GameWidget::skipToEndTest()
+{
+    if (!m_gameActive || m_paused) return;
+    if (!m_audioEngine || m_audioEngine->duration() <= 0) return;
+
+    qint64 dur = m_audioEngine->duration();
+    qint64 target = qMax<qint64>(0, dur - 10000);
+
+    // 跳过开场倒计时（如果还在进行中）
+    m_audioStarted = true;
+
+    // 静默跳过目标时间之前的所有音符（不计分、不计 Miss）
+    for (GameNote& note : m_notes) {
+        if (!note.judged && note.timestampMs < target) {
+            note.judged = true;
+        }
+    }
+    m_activeHolds.clear();
+
+    // 将游戏时钟重基准到目标时间，使 getGameTime() 立即返回 target
+    m_startPosMs = target;
+    m_totalPausedMs = 0;
+    m_pauseElapsedMs = 0;
+    m_gameClock.restart();
+
+    // 音频同步跳转到目标位置并继续播放
+    m_audioEngine->seek(target);
+    m_audioEngine->play();
+
+    setFocus();
 }
 
 void GameWidget::pauseGame()
 {
     m_paused = true;
     // 记录暂停时刻已经过的时间
-    m_pauseElapsedMs = m_gameClock.elapsed();
-    if (m_audioEngine) {
+    if (m_gameClock.isValid()) {
+        m_pauseElapsedMs = m_gameClock.elapsed();
+    }
+    // 倒计时期间音频未启动，不需要暂停
+    if (m_audioEngine && m_audioStarted) {
         m_audioEngine->pause();
     }
 }
@@ -500,9 +349,12 @@ void GameWidget::resumeGame()
 {
     m_paused = false;
     // 累加暂停时间
-    m_totalPausedMs += (m_gameClock.elapsed() - m_pauseElapsedMs);
+    if (m_gameClock.isValid()) {
+        m_totalPausedMs += (m_gameClock.elapsed() - m_pauseElapsedMs);
+    }
     setFocus();
-    if (m_audioEngine) {
+    // 倒计时期间音频未启动，不需要恢复
+    if (m_audioEngine && m_audioStarted) {
         m_audioEngine->play();
     }
 }
@@ -513,6 +365,9 @@ void GameWidget::resizeEvent(QResizeEvent* event)
     if (m_pauseOverlay) {
         m_pauseOverlay->setGeometry(0, 0, width(), height());
     }
+    if (m_testSkipBtn) {
+        m_testSkipBtn->setGeometry(width() - 140, 6, 130, 26);
+    }
     // 标记背景缓存需要重建（paintEvent 中会检测并重建）
 }
 
@@ -520,9 +375,8 @@ qint64 GameWidget::getGameTime() const
 {
     if (!m_gameClock.isValid()) return 0;
     qint64 elapsed = m_gameClock.elapsed();
-    // 减去累计暂停时间，得到实际游戏时间
-    qint64 gameTime = elapsed - m_totalPausedMs + m_startPosMs;
-    return qMax<qint64>(0, gameTime);
+    // 减去累计暂停时间，得到实际游戏时间（可为负，用于开场倒计时）
+    return elapsed - m_totalPausedMs + m_startPosMs;
 }
 
 void GameWidget::paintEvent(QPaintEvent* event)
@@ -618,6 +472,7 @@ void GameWidget::paintEvent(QPaintEvent* event)
     }
 
     // ═══ 4. 音符（霓虹化）═══
+    // 倒计时期间也渲染音符（此时 game time 为负，音符在屏幕上方，自然下落）
     if (m_gameActive) {
         qreal noteHeight = 14;
 
@@ -889,8 +744,18 @@ void GameWidget::paintEvent(QPaintEvent* event)
     painter.setPen(QColor(80, 80, 120));
     hudFont.setPixelSize(12);
     painter.setFont(hudFont);
-    painter.drawText(w - 220, h - 10, QStringLiteral("同轨: %1ms | 跨轨: %2ms | ESC 暂停")
-                     .arg(m_minGapMs).arg(m_globalMinGapMs));
+    painter.drawText(w - 100, h - 10, QStringLiteral("ESC 暂停"));
+
+    // ── 开场倒计时数字（game time < 0 时显示）──
+    if (gameTime < 0) {
+        int secondsLeft = static_cast<int>((-gameTime + 999) / 1000);
+        painter.setPen(QColor(200, 210, 255, 230));
+        QFont cdFont = hudFont;
+        cdFont.setPixelSize(80);
+        cdFont.setBold(true);
+        painter.setFont(cdFont);
+        painter.drawText(QRectF(0, 0, w, h), Qt::AlignCenter, QString::number(secondsLeft));
+    }
 }
 
 void GameWidget::keyPressEvent(QKeyEvent* event)
@@ -927,7 +792,7 @@ void GameWidget::keyPressEvent(QKeyEvent* event)
     }
 
     m_keyPressed[lane] = true;
-    if (m_gameActive && !m_paused) judgeLane(lane);
+    if (m_gameActive && !m_paused && m_audioStarted) judgeLane(lane);
 }
 
 void GameWidget::keyReleaseEvent(QKeyEvent* event)
@@ -954,7 +819,7 @@ void GameWidget::keyReleaseEvent(QKeyEvent* event)
     }
     if (lane >= 0) {
         // Hold 尾部释放判定
-        if (m_gameActive && !m_paused) {
+        if (m_gameActive && !m_paused && m_audioStarted) {
             judgeHoldRelease(lane);
         }
         m_keyPressed[lane] = false;
@@ -969,6 +834,24 @@ void GameWidget::onRenderTick()
     qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     qint64 deltaMs = (m_lastFrameTime > 0) ? (nowMs - m_lastFrameTime) : 16;
     m_lastFrameTime = nowMs;
+
+    // ── 开场倒计时（game time < 0 时为倒计时阶段）──
+    qint64 gameTime = getGameTime();
+
+    // game time 到达 0 时启动音频
+    if (!m_audioStarted && gameTime >= 0) {
+        m_audioStarted = true;
+        if (m_audioEngine) {
+            m_audioEngine->seek(0);
+            m_audioEngine->play();
+        }
+    }
+
+    // 倒计时期间不执行游戏逻辑，只刷新画面（音符从顶部自然下落）
+    if (gameTime < 0) {
+        update();
+        return;
+    }
 
     // 更新特效
     updateEffects(deltaMs);
@@ -1021,7 +904,6 @@ void GameWidget::onRenderTick()
     }
 
     // 检查游戏是否结束
-    qint64 gameTime = getGameTime();
     if (m_audioEngine) {
         qint64 dur = m_audioEngine->duration();
         if (gameTime >= dur && dur > 0) {
@@ -1036,6 +918,7 @@ void GameWidget::onRenderTick()
                 m_gameActive = false;
                 m_renderTimer->stop();
                 m_audioEngine->pause();
+                if (m_testSkipBtn) m_testSkipBtn->hide();
                 emit gameFinished();
                 return;
             }

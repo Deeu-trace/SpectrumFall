@@ -11,13 +11,17 @@ class BeatDetector;
 class NoteGenerator;
 class ScoreManager;
 class CacheManager;
+class LeaderboardManager;
+class ChartManager;
 class MainMenuWidget;
 class SongSelectWidget;
 class VisualizationWidget;
 class GameWidget;
 class ResultWidget;
+class LeaderboardWidget;
+class ChartEditorWidget;
 
-/// 主窗口：QStackedWidget 容器，管理 5 个页面的导航
+/// 主窗口：QStackedWidget 容器，管理 7 个页面的导航
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -31,12 +35,14 @@ protected:
 
 private slots:
     void onSongSelectRequested();
+    void onLeaderboardRequested();
     void onAnalyzeRequested(const QString& path);
     void onVisualizeRequested();
     void onGameRequested();
     void onGameFinished();
     void onRetryRequested();
     void onBackToMenuRequested();
+    void onScoreSubmitted(const QString& playerName);
     void onAnalyzeFinished();
     void onAnalysisTimeout();
 
@@ -46,8 +52,14 @@ private slots:
     /// 删除历史记录
     void onHistoryDeleteRequested(const QString& filePath);
 
+    /// 打开谱面编辑器
+    void onChartEditRequested();
+
+    /// 用编辑后的音符开始游戏
+    void onChartPlayRequested(const QVector<GameNote>& notes);
+
 private:
-    /// 导航到指定页面（0=主菜单, 1=歌曲选择, 2=可视化, 3=游戏, 4=结算）
+    /// 导航到指定页面（0=主菜单, 1=歌曲选择, 2=可视化, 3=游戏, 4=结算, 5=排行榜, 6=谱面编辑）
     void navigateTo(int pageIndex);
 
     /// 构建 UI
@@ -71,14 +83,19 @@ private:
     NoteGenerator* m_noteGenerator;      ///< 音符生成器
     ScoreManager* m_scoreManager;        ///< 分数管理器
     CacheManager* m_cacheManager;        ///< 缓存管理器
+    LeaderboardManager* m_leaderboardManager;  ///< 排行榜管理器
+    ChartManager* m_chartManager;        ///< 谱面管理器
     MainMenuWidget* m_mainMenuPage;      ///< 主菜单页
     SongSelectWidget* m_songSelectPage;  ///< 歌曲选择页
     VisualizationWidget* m_visPage;      ///< 可视化页
     GameWidget* m_gamePage;              ///< 游戏页
     ResultWidget* m_resultPage;          ///< 结算页
+    LeaderboardWidget* m_leaderboardPage; ///< 排行榜页
+    ChartEditorWidget* m_chartEditorPage; ///< 谱面编辑页
 
     QString m_currentSongPath;           ///< 当前选中的歌曲路径
-    QVector<GameNote> m_currentNotes;    ///< 当前游戏的音符列表
+    QVector<GameNote> m_currentNotes;    ///< 当前歌曲的原始音符（6键，不被4K重映射修改）
+    QVector<GameNote> m_gameNotes;       ///< 当前游戏使用的音符（4K时从m_currentNotes拷贝并重映射）
     QVector<GameNote> m_pendingNotes;    ///< 后台线程生成的音符（完成后移入 m_currentNotes）
 
     // 异步加载相关

@@ -48,6 +48,9 @@
     <QtMoc Include="include\WaterfallVisualizer.h">
       <Filter>Header Files</Filter>
     </QtMoc>
+    <QtMoc Include="include\GLSpectrumWidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
     <QtMoc Include="include\MainMenuWidget.h">
       <Filter>Header Files</Filter>
     </QtMoc>
@@ -66,7 +69,25 @@
     <QtMoc Include="include\ScoreManager.h">
       <Filter>Header Files</Filter>
     </QtMoc>
+    <QtMoc Include="include\CacheManager.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
     <QtMoc Include="include\AudioEffectWidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="include\LeaderboardManager.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="include\LeaderboardWidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="include\ChartManager.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="include\ChartEditorWidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="include\ChartTimelineWidget.h">
       <Filter>Header Files</Filter>
     </QtMoc>
   </ItemGroup>
@@ -125,6 +146,12 @@
     <ClCompile Include="src\CacheManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\LeaderboardManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\LeaderboardWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\GLSpectrumWidget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -132,6 +159,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\AudioEffectWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ChartManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ChartEditorWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ChartTimelineWidget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

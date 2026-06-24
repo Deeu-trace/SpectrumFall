@@ -57,6 +57,7 @@ signals:
     void analyzeRequested(const QString& path);
     void visualizeRequested();
     void gameRequested();
+    void chartEditRequested();
     void backRequested();
     void historySelected(const QString& filePath);  ///< 点击历史记录条目
     void historyDeleteRequested(const QString& filePath);  ///< 删除历史记录条目
@@ -81,6 +82,7 @@ private:
     QPushButton* m_analyzeBtn;       ///< 开始分析 BPM 按钮
     QPushButton* m_visualizeBtn;     ///< 可视化模式按钮
     QPushButton* m_gameBtn;          ///< 开始游戏按钮
+    QPushButton* m_chartEditBtn;     ///< 编辑谱面按钮
     QPushButton* m_backBtn;          ///< 返回按钮
 
     QLabel* m_fileNameLabel;         ///< 文件名

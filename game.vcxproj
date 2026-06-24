@@ -114,8 +114,13 @@
     <QtMoc Include="include\ResultWidget.h" />
     <QtMoc Include="include\ScoreManager.h" />
     <QtMoc Include="include\CacheManager.h" />
+    <QtMoc Include="include\LeaderboardManager.h" />
+    <QtMoc Include="include\LeaderboardWidget.h" />
     <QtMoc Include="include\GLSpectrumWidget.h" />
     <QtMoc Include="include\AudioEffectWidget.h" />
+    <QtMoc Include="include\ChartManager.h" />
+    <QtMoc Include="include\ChartEditorWidget.h" />
+    <QtMoc Include="include\ChartTimelineWidget.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="game.cpp" />
@@ -136,9 +141,14 @@
     <ClCompile Include="src\ResultWidget.cpp" />
     <ClCompile Include="src\ScoreManager.cpp" />
     <ClCompile Include="src\CacheManager.cpp" />
+    <ClCompile Include="src\LeaderboardManager.cpp" />
+    <ClCompile Include="src\LeaderboardWidget.cpp" />
     <ClCompile Include="src\GLSpectrumWidget.cpp" />
     <ClCompile Include="src\AudioEffectProcessor.cpp" />
     <ClCompile Include="src\AudioEffectWidget.cpp" />
+    <ClCompile Include="src\ChartManager.cpp" />
+    <ClCompile Include="src\ChartEditorWidget.cpp" />
+    <ClCompile Include="src\ChartTimelineWidget.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

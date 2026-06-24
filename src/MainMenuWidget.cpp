@@ -48,6 +48,14 @@ MainMenuWidget::MainMenuWidget(QWidget* parent)
 
     layout->addSpacing(10);
 
+    // 排行榜按钮
+    m_leaderboardBtn = new QPushButton(QStringLiteral("排行榜"), this);
+    m_leaderboardBtn->setMinimumSize(220, 50);
+    m_leaderboardBtn->setObjectName("menuButton");
+    layout->addWidget(m_leaderboardBtn, 0, Qt::AlignCenter);
+
+    layout->addSpacing(10);
+
     // 退出按钮
     m_exitBtn = new QPushButton(QStringLiteral("退出"), this);
     m_exitBtn->setMinimumSize(220, 50);
@@ -58,6 +66,7 @@ MainMenuWidget::MainMenuWidget(QWidget* parent)
 
     // 连接信号
     connect(m_selectSongBtn, &QPushButton::clicked, this, &MainMenuWidget::songSelectRequested);
+    connect(m_leaderboardBtn, &QPushButton::clicked, this, &MainMenuWidget::leaderboardRequested);
     connect(m_exitBtn, &QPushButton::clicked, this, &MainMenuWidget::exitRequested);
 
     // 背景动画定时器

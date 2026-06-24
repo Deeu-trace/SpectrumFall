@@ -1,5 +1,6 @@
 #include "ResultWidget.h"
 #include <QPushButton>
+#include <QLineEdit>
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -86,6 +87,42 @@ ResultWidget::ResultWidget(QWidget* parent)
     m_maxComboLabel->setStyleSheet("color: #bd93f9; font-size: 20px; background: transparent;");
     layout->addWidget(m_maxComboLabel);
 
+    layout->addSpacing(20);
+
+    // 本次排名提示
+    m_rankLabel = new QLabel(QStringLiteral("完成一曲，记入排行榜？"), this);
+    m_rankLabel->setAlignment(Qt::AlignCenter);
+    m_rankLabel->setStyleSheet("color: #8888aa; font-size: 16px; background: transparent;");
+    layout->addWidget(m_rankLabel);
+
+    layout->addSpacing(10);
+
+    // 玩家名 + 记入按钮 行
+    QHBoxLayout* nameLayout = new QHBoxLayout();
+    nameLayout->setAlignment(Qt::AlignCenter);
+    nameLayout->setSpacing(12);
+
+    QLabel* nameLabel = new QLabel(QStringLiteral("玩家名"), this);
+    nameLabel->setStyleSheet("color: #bd93f9; font-size: 16px; background: transparent;");
+    nameLayout->addWidget(nameLabel);
+
+    m_nameEdit = new QLineEdit(this);
+    m_nameEdit->setText(QStringLiteral("Player"));
+    m_nameEdit->setMaxLength(20);
+    m_nameEdit->setMinimumWidth(220);
+    m_nameEdit->setStyleSheet(
+        "QLineEdit { color: #ffffff; background-color: #16213e; "
+        "border: 2px solid #0f3460; border-radius: 8px; padding: 6px 10px; font-size: 16px; }"
+        "QLineEdit:focus { border-color: #00ff88; }");
+    nameLayout->addWidget(m_nameEdit);
+
+    m_submitBtn = new QPushButton(QStringLiteral("记入排行榜"), this);
+    m_submitBtn->setMinimumSize(150, 40);
+    m_submitBtn->setObjectName("actionButton");
+    nameLayout->addWidget(m_submitBtn);
+
+    layout->addLayout(nameLayout);
+
     layout->addSpacing(30);
 
     // 按钮行
@@ -107,6 +144,18 @@ ResultWidget::ResultWidget(QWidget* parent)
     // 连接信号
     connect(m_retryBtn, &QPushButton::clicked, this, &ResultWidget::retryRequested);
     connect(m_backBtn, &QPushButton::clicked, this, &ResultWidget::backRequested);
+
+    // 记入排行榜：发送玩家名并禁用按钮，防止重复提交
+    connect(m_submitBtn, &QPushButton::clicked, this, [this]() {
+        QString name = m_nameEdit->text().trimmed();
+        if (name.isEmpty()) {
+            name = QStringLiteral("Player");
+            m_nameEdit->setText(name);
+        }
+        m_submitBtn->setEnabled(false);
+        m_submitBtn->setText(QStringLiteral("已记入"));
+        emit scoreSubmitted(name);
+    });
 }
 
 void ResultWidget::setResult(int score, int perfect, int good, int miss, int maxCombo, int totalNotes)
@@ -132,6 +181,12 @@ void ResultWidget::setResult(int score, int perfect, int good, int miss, int max
     } else {
         m_gradeLabel->setStyleSheet("color: #e94560; background: transparent;");
     }
+
+    // 重置记入排行榜状态，供本局重新提交
+    m_submitBtn->setEnabled(true);
+    m_submitBtn->setText(QStringLiteral("记入排行榜"));
+    m_rankLabel->setText(QStringLiteral("完成一曲，记入排行榜？"));
+    m_rankLabel->setStyleSheet("color: #8888aa; font-size: 16px; background: transparent;");
 }
 
 QString ResultWidget::calculateGrade(int score, int totalNotes) const
@@ -146,4 +201,20 @@ QString ResultWidget::calculateGrade(int score, int totalNotes) const
     if (ratio >= 0.60f) return QStringLiteral("B");
     if (ratio >= 0.40f) return QStringLiteral("C");
     return QStringLiteral("D");
+}
+
+void ResultWidget::presetName(const QString& name)
+{
+    m_nameEdit->setText(name.isEmpty() ? QStringLiteral("Player") : name);
+}
+
+void ResultWidget::showRank(int rank, int totalInBoard)
+{
+    if (rank <= 0) {
+        m_rankLabel->setText(QStringLiteral("未进入前 50 名，再接再厉！"));
+        m_rankLabel->setStyleSheet("color: #e94560; font-size: 16px; background: transparent;");
+    } else {
+        m_rankLabel->setText(QStringLiteral("本次排名  #%1 / %2").arg(rank).arg(totalInBoard));
+        m_rankLabel->setStyleSheet("color: #00ff88; font-size: 18px; font-weight: bold; background: transparent;");
+    }
 }

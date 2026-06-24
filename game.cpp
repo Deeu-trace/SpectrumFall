@@ -9,6 +9,10 @@
 #include "VisualizationWidget.h"
 #include "GameWidget.h"
 #include "ResultWidget.h"
+#include "LeaderboardWidget.h"
+#include "LeaderboardManager.h"
+#include "ChartEditorWidget.h"
+#include "ChartManager.h"
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -28,11 +32,15 @@ MainWindow::MainWindow(QWidget* parent)
     , m_noteGenerator(new NoteGenerator())
     , m_scoreManager(new ScoreManager(this))
     , m_cacheManager(new CacheManager(this))
+    , m_leaderboardManager(new LeaderboardManager(this))
+    , m_chartManager(new ChartManager(this))
     , m_mainMenuPage(nullptr)
     , m_songSelectPage(nullptr)
     , m_visPage(nullptr)
     , m_gamePage(nullptr)
     , m_resultPage(nullptr)
+    , m_leaderboardPage(nullptr)
+    , m_chartEditorPage(nullptr)
     , m_loadWatcher(new QFutureWatcher<void>(this))
     , m_loadSuccess(false)
     , m_analyzedBpm(0.0f)
@@ -71,30 +79,40 @@ void MainWindow::setupUI()
     setMinimumSize(800, 600);
     resize(1000, 700);
 
-    // 创建 5 个页面
+    // 创建 7 个页面
     m_mainMenuPage = new MainMenuWidget(this);
     m_songSelectPage = new SongSelectWidget(this);
     m_visPage = new VisualizationWidget(m_audioEngine, this);
     m_gamePage = new GameWidget(m_audioEngine, m_scoreManager, this);
     m_resultPage = new ResultWidget(this);
+    m_leaderboardPage = new LeaderboardWidget(m_leaderboardManager, this);
+    m_chartEditorPage = new ChartEditorWidget(m_audioEngine, m_chartManager, this);
 
-    // 添加到 QStackedWidget（按顺序：0-4）
+    // 添加到 QStackedWidget（按顺序：0-6）
     m_stack->addWidget(m_mainMenuPage);      // 索引 0：主菜单
     m_stack->addWidget(m_songSelectPage);    // 索引 1：歌曲选择
     m_stack->addWidget(m_visPage);           // 索引 2：可视化
     m_stack->addWidget(m_gamePage);          // 索引 3：游戏
     m_stack->addWidget(m_resultPage);        // 索引 4：结算
+    m_stack->addWidget(m_leaderboardPage);   // 索引 5：排行榜
+    m_stack->addWidget(m_chartEditorPage);   // 索引 6：谱面编辑
 
     setCentralWidget(m_stack);
 }
 
 void MainWindow::connectSignals()
 {
-    // 主菜单 → 歌曲选择
+    // 主菜单 → 歌曲选择 / 排行榜 / 退出
     connect(m_mainMenuPage, &MainMenuWidget::songSelectRequested,
             this, &MainWindow::onSongSelectRequested);
+    connect(m_mainMenuPage, &MainMenuWidget::leaderboardRequested,
+            this, &MainWindow::onLeaderboardRequested);
     connect(m_mainMenuPage, &MainMenuWidget::exitRequested,
             QApplication::instance(), &QApplication::quit);
+
+    // 排行榜页 → 返回主菜单
+    connect(m_leaderboardPage, &LeaderboardWidget::backRequested,
+            this, [this]() { navigateTo(0); });
 
     // 歌曲选择 → 手动分析
     connect(m_songSelectPage, &SongSelectWidget::analyzeRequested,
@@ -116,6 +134,14 @@ void MainWindow::connectSignals()
     connect(m_songSelectPage, &SongSelectWidget::historyDeleteRequested,
             this, &MainWindow::onHistoryDeleteRequested);
 
+    // 谱面编辑器 → 开始游戏 / 返回
+    connect(m_songSelectPage, &SongSelectWidget::chartEditRequested,
+            this, &MainWindow::onChartEditRequested);
+    connect(m_chartEditorPage, &ChartEditorWidget::playRequested,
+            this, &MainWindow::onChartPlayRequested);
+    connect(m_chartEditorPage, &ChartEditorWidget::backRequested,
+            this, [this]() { m_audioEngine->pause(); navigateTo(1); });
+
     // 可视化页 → 返回
     connect(m_visPage, &VisualizationWidget::backRequested,
             this, [this]() {
@@ -130,11 +156,13 @@ void MainWindow::connectSignals()
     connect(m_gamePage, &GameWidget::backRequested,
             this, [this]() { navigateTo(0); });
 
-    // 结算页 → 重试/返回
+    // 结算页 → 重试/返回/记入排行榜
     connect(m_resultPage, &ResultWidget::retryRequested,
             this, &MainWindow::onRetryRequested);
     connect(m_resultPage, &ResultWidget::backRequested,
             this, &MainWindow::onBackToMenuRequested);
+    connect(m_resultPage, &ResultWidget::scoreSubmitted,
+            this, &MainWindow::onScoreSubmitted);
 
     // 异步分析完成
     connect(m_loadWatcher, &QFutureWatcher<void>::finished,
@@ -168,6 +196,13 @@ void MainWindow::onSongSelectRequested()
     // 每次进入歌曲选择页时刷新历史
     refreshHistory();
     navigateTo(1);
+}
+
+void MainWindow::onLeaderboardRequested()
+{
+    // 进入排行榜页前刷新，载入最新记录
+    m_leaderboardPage->refresh();
+    navigateTo(5);
 }
 
 void MainWindow::onAnalyzeRequested(const QString& path)
@@ -370,10 +405,11 @@ void MainWindow::onGameRequested()
     if (mode == 0) return;
     m_gameLaneCount = mode;
 
-    // 选 4 键时：把 6 键的 lane 映射到 4 键
+    // 拷贝一份用于游戏（4K 重映射改副本，不破坏原始 6 键数据）
+    m_gameNotes = m_currentNotes;
     if (m_gameLaneCount == 4) {
         static const int laneMap6to4[6] = {0, 0, 1, 2, 3, 3};
-        for (auto& note : m_currentNotes) {
+        for (auto& note : m_gameNotes) {
             if (note.lane >= 0 && note.lane < 6) {
                 note.lane = laneMap6to4[note.lane];
             }
@@ -381,12 +417,12 @@ void MainWindow::onGameRequested()
     }
 
     navigateTo(3);
-    m_gamePage->startGame(m_currentNotes, m_gameLaneCount);
+    m_gamePage->startGame(m_gameNotes, m_gameLaneCount);
 }
 
 void MainWindow::onGameFinished()
 {
-    int totalNotes = m_currentNotes.size();
+    int totalNotes = m_gameNotes.size();
     m_resultPage->setResult(
         m_scoreManager->score(),
         m_scoreManager->perfectCount(),
@@ -395,24 +431,60 @@ void MainWindow::onGameFinished()
         m_scoreManager->maxCombo(),
         totalNotes
     );
+    // 预填上次使用的玩家名，供玩家确认后记入排行榜
+    m_resultPage->presetName(m_leaderboardManager->myName());
     navigateTo(4);
 }
 
 void MainWindow::onRetryRequested()
 {
     m_scoreManager->reset();
-    if (m_currentNotes.isEmpty()) {
+    if (m_gameNotes.isEmpty()) {
         navigateTo(1);
         return;
     }
     navigateTo(3);
-    m_gamePage->startGame(m_currentNotes, m_gameLaneCount);
+    m_gamePage->startGame(m_gameNotes, m_gameLaneCount);
 }
 
 void MainWindow::onBackToMenuRequested()
 {
     m_audioEngine->pause();
     navigateTo(0);
+}
+
+// ── 排行榜相关 ───────────────────────────────────────────────
+void MainWindow::onScoreSubmitted(const QString& playerName)
+{
+    // 记住本机玩家名，下次结算预填
+    m_leaderboardManager->setMyName(playerName);
+
+    if (m_currentSongPath.isEmpty()) {
+        m_resultPage->showRank(0, 0);
+        return;
+    }
+
+    QFileInfo fi(m_currentSongPath);
+
+    LeaderboardEntry entry;
+    entry.songFileName   = fi.fileName();
+    entry.songFileSize   = fi.size();
+    entry.songDurationMs = m_audioEngine->duration();
+    entry.bpm            = m_analyzedBpm;
+    entry.laneCount      = m_gameLaneCount;
+    entry.playerName     = playerName;
+    entry.score          = m_scoreManager->score();
+    entry.perfect        = m_scoreManager->perfectCount();
+    entry.good           = m_scoreManager->goodCount();
+    entry.miss           = m_scoreManager->missCount();
+    entry.maxCombo       = m_scoreManager->maxCombo();
+    entry.totalNotes     = m_gameNotes.size();
+    entry.grade          = m_scoreManager->grade(entry.totalNotes);
+    entry.playedAt       = QDateTime::currentDateTime();
+
+    int rank = m_leaderboardManager->addEntry(entry);
+    int total = m_leaderboardManager->entriesForSong(entry.songFileSize, entry.laneCount).size();
+    m_resultPage->showRank(rank, total);
 }
 
 // ── 缓存相关 ────────────────────────────────────────────────
@@ -495,4 +567,38 @@ void MainWindow::saveToCache()
 void MainWindow::refreshHistory()
 {
     m_songSelectPage->refreshHistory(m_cacheManager->allEntries());
+}
+
+// ── 谱面编辑器相关 ───────────────────────────────────────────────
+void MainWindow::onChartEditRequested()
+{
+    if (m_currentSongPath.isEmpty() || m_currentNotes.isEmpty()) return;
+
+    QFileInfo fi(m_currentSongPath);
+    qint64 fileSize = fi.size();
+    qint64 duration = m_audioEngine->duration();
+
+    // 优先载入已保存的谱面，没有则用当前分析结果
+    QVector<GameNote> notes;
+    const ChartEntry* chart = m_chartManager->findChart(fileSize);
+    if (chart) {
+        notes.reserve(chart->notes.size());
+        for (const auto& pair : chart->notes) {
+            notes.append(GameNote(pair.first, pair.second));
+        }
+    } else {
+        notes = m_currentNotes;
+    }
+
+    m_chartEditorPage->loadChart(notes, m_currentSongPath, fileSize, duration, m_analyzedBpm);
+    navigateTo(6);
+}
+
+void MainWindow::onChartPlayRequested(const QVector<GameNote>& notes)
+{
+    // 用编辑后的音符替换当前音符，复用现有游戏入口
+    m_currentNotes = notes;
+    m_audioEngine->pause();
+    navigateTo(1);
+    onGameRequested();
 }

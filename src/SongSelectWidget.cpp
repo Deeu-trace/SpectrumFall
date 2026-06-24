@@ -187,6 +187,12 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     m_visualizeBtn->setObjectName("actionButton");
     btnLayout->addWidget(m_visualizeBtn);
 
+    m_chartEditBtn = new QPushButton(QStringLiteral("编辑谱面"), this);
+    m_chartEditBtn->setMinimumSize(150, 40);
+    m_chartEditBtn->setEnabled(false);
+    m_chartEditBtn->setObjectName("actionButton");
+    btnLayout->addWidget(m_chartEditBtn);
+
     m_gameBtn = new QPushButton(QStringLiteral("开始游戏"), this);
     m_gameBtn->setMinimumSize(150, 40);
     m_gameBtn->setEnabled(false);
@@ -211,6 +217,8 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
             this, &SongSelectWidget::onVisualizeClicked);
     connect(m_gameBtn,      &QPushButton::clicked,
             this, &SongSelectWidget::onGameClicked);
+    connect(m_chartEditBtn, &QPushButton::clicked,
+            this, &SongSelectWidget::chartEditRequested);
     connect(m_backBtn,      &QPushButton::clicked,
             this, &SongSelectWidget::backRequested);
 
@@ -257,6 +265,7 @@ void SongSelectWidget::onAnalysisComplete(float bpm)
 
     m_visualizeBtn->setEnabled(true);
     m_gameBtn->setEnabled(true);
+    m_chartEditBtn->setEnabled(true);
     m_selectFileBtn->setText(QStringLiteral("重新选择文件"));
     m_selectFileBtn->setEnabled(true);
     m_analyzeBtn->setEnabled(true);
@@ -296,6 +305,7 @@ void SongSelectWidget::resetState()
     m_analyzeBtn->setText(QStringLiteral("开始分析BPM并生成谱面"));
     m_visualizeBtn->setEnabled(false);
     m_gameBtn->setEnabled(false);
+    m_chartEditBtn->setEnabled(false);
 }
 
 void SongSelectWidget::refreshHistory(const QVector<CacheEntry>& entries)
@@ -350,6 +360,7 @@ void SongSelectWidget::loadFromCache(const QString& filePath, float bpm, qint64 
     m_analyzeBtn->setText(QStringLiteral("重新分析"));
     m_visualizeBtn->setEnabled(true);
     m_gameBtn->setEnabled(true);
+    m_chartEditBtn->setEnabled(true);
 
     m_fileInfoPanel->show();
 }
@@ -425,6 +436,7 @@ void SongSelectWidget::onSelectFileClicked()
     m_analyzeBtn->setText(QStringLiteral("开始分析BPM并生成谱面"));
     m_visualizeBtn->setEnabled(false);
     m_gameBtn->setEnabled(false);
+    m_chartEditBtn->setEnabled(false);
 
     m_fileInfoPanel->show();
     m_selectFileBtn->setText(QStringLiteral("重新选择文件"));
@@ -502,6 +514,7 @@ void SongSelectWidget::enterAnalyzingState()
     m_selectFileBtn->setEnabled(false);
     m_visualizeBtn->setEnabled(false);
     m_gameBtn->setEnabled(false);
+    m_chartEditBtn->setEnabled(false);
     m_errorLabel->hide();
 
     m_progressBar->setValue(0);
