@@ -11,11 +11,14 @@ class QListWidget;
 class QListWidgetItem;
 class QMenu;
 class QDialog;
+class QSplitter;
+class QFrame;
 class SpinnerWidget;
+class LeaderboardManager;
 
-struct CacheEntry;  // 前向声明，避免包含 CacheManager.h
+struct CacheEntry;  // forward declaration
 
-/// 歌曲选择页面：本地文件选择 + 手动 BPM 分析 + 历史记录
+/// Song selection page: two-panel layout (left=history+select, right=3 cards)
 class SongSelectWidget : public QWidget
 {
     Q_OBJECT
@@ -23,35 +26,44 @@ class SongSelectWidget : public QWidget
 public:
     explicit SongSelectWidget(QWidget* parent = nullptr);
 
-    /// 获取当前选中的歌曲路径
+    /// Get currently selected song path
     QString selectedSong() const;
 
-    /// 设置分析进度（0-100），同时管理分析状态 UI
+    /// Get currently selected lane count (4 or 6)
+    int selectedLaneCount() const;
+
+    /// Set analysis progress (0-100), manages analyzing-state UI
     void setAnalysisProgress(int percent);
 
-    /// 更新时长显示
+    /// Update duration display
     void setDurationDisplay(qint64 ms);
 
-    /// 分析完成，更新 UI 为成功状态
+    /// Analysis complete, update UI to success state
     void onAnalysisComplete(float bpm);
 
-    /// 显示分析错误信息，重新启用按钮
+    /// Show analysis error, re-enable buttons
     void showAnalysisError(const QString& message);
 
-    /// 重置到初始状态（无文件选中）
+    /// Reset to initial state (no file selected)
     void resetState();
 
-    /// 刷新历史记录列表
+    /// Refresh history list
     void refreshHistory(const QVector<CacheEntry>& entries);
 
-    /// 从缓存加载完成，设置 UI 为"已分析"状态
+    /// Load from cache, set UI to analyzed state
     void loadFromCache(const QString& filePath, float bpm, qint64 durationMs);
 
-    /// 显示加载中状态（禁用所有按钮 + 显示 spinner）
+    /// Show loading state (disable all buttons + show spinner)
     void showLoadingState();
 
-    /// 隐藏加载中状态（恢复按钮可用性）
+    /// Hide loading state (restore buttons)
     void hideLoadingState();
+
+    /// Set leaderboard manager for score history display
+    void setLeaderboardManager(LeaderboardManager* mgr);
+
+    /// Refresh score history from leaderboard data
+    void updateScoreHistory();
 
 signals:
     void analyzeRequested(const QString& path);
@@ -59,8 +71,8 @@ signals:
     void gameRequested();
     void chartEditRequested();
     void backRequested();
-    void historySelected(const QString& filePath);  ///< 点击历史记录条目
-    void historyDeleteRequested(const QString& filePath);  ///< 删除历史记录条目
+    void historySelected(const QString& filePath);
+    void historyDeleteRequested(const QString& filePath);
 
 private slots:
     void onSelectFileClicked();
@@ -70,38 +82,64 @@ private slots:
     void onHistoryItemClicked(QListWidgetItem* item);
     void onHistoryContextMenu(const QPoint& pos);
     void onHistoryDeleteClicked();
+    void onLaneToggled();
 
 private:
     void enterAnalyzingState();
     void exitAnalyzingState();
+    void updateLaneButtons();
+    void setCardsVisible(bool visible);
     QString formatFileSize(qint64 bytes) const;
     QString formatDuration(qint64 ms) const;
     QString formatDateTime(const QDateTime& dt) const;
 
-    QPushButton* m_selectFileBtn;    ///< 选择/重新选择文件按钮
-    QPushButton* m_analyzeBtn;       ///< 开始分析 BPM 按钮
-    QPushButton* m_visualizeBtn;     ///< 可视化模式按钮
-    QPushButton* m_gameBtn;          ///< 开始游戏按钮
-    QPushButton* m_chartEditBtn;     ///< 编辑谱面按钮
-    QPushButton* m_backBtn;          ///< 返回按钮
+    // Layout
+    QSplitter* m_splitter;           ///< Left-right splitter
 
-    QLabel* m_fileNameLabel;         ///< 文件名
-    QLabel* m_fileSizeLabel;         ///< 文件大小
-    QLabel* m_durationLabel;         ///< 时长
-    QLabel* m_bpmLabel;              ///< BPM 显示
-    QLabel* m_errorLabel;            ///< 错误信息
+    // Left panel
+    QWidget* m_leftPanel;            ///< Left panel container
+    QPushButton* m_selectFileBtn;    ///< Select / re-select file button
+    QLabel* m_historyTitle;          ///< History title label
+    QListWidget* m_historyList;      ///< History list
+    QMenu* m_historyMenu;            ///< Right-click menu
 
-    QProgressBar* m_progressBar;     ///< 分析进度条
-    SpinnerWidget* m_spinner;        ///< 转圈加载动画
-    QDialog* m_spinnerDialog;        ///< 加载弹窗（历史记录加载用）
+    // Right panel
+    QWidget* m_rightPanel;           ///< Right panel container
+    QLabel* m_placeholderLabel;      ///< Placeholder when no file selected
+    QWidget* m_cardsContainer;       ///< Container for 3 cards
 
-    QWidget* m_fileInfoPanel;        ///< 文件信息+分析区域容器
+    // Card 1: File info
+    QFrame* m_infoCard;              ///< Info card frame
+    QLabel* m_fileNameLabel;         ///< File name
+    QLabel* m_fileSizeLabel;         ///< File size
+    QLabel* m_durationLabel;         ///< Duration
+    QLabel* m_bpmLabel;              ///< BPM display
+    QLabel* m_errorLabel;            ///< Error message
+    QPushButton* m_analyzeBtn;       ///< Analyze BPM button
+    QProgressBar* m_progressBar;     ///< Analysis progress bar
+    SpinnerWidget* m_spinner;        ///< Spinner animation
+    QDialog* m_spinnerDialog;        ///< Loading dialog (for history loading)
 
-    // 历史记录
-    QLabel* m_historyTitle;          ///< 历史记录标题
-    QListWidget* m_historyList;      ///< 历史记录列表
-    QMenu* m_historyMenu;            ///< 右键菜单
+    // Card 2: Score history
+    QFrame* m_scoreCard;             ///< Score history card frame
+    QLabel* m_scoreHistoryTitle;     ///< Score history section title
+    QLabel* m_scoreHist1;            ///< Recent score row 1
+    QLabel* m_scoreHist2;            ///< Recent score row 2
+    QLabel* m_scoreHist3;            ///< Recent score row 3
 
-    QString m_selectedPath;          ///< 当前选中文件路径
-    bool m_analysisDone;             ///< 分析是否已完成
+    // Card 3: Game mode
+    QFrame* m_modeCard;              ///< Game mode card frame
+    QPushButton* m_4kBtn;            ///< 4-key mode button
+    QPushButton* m_6kBtn;            ///< 6-key mode button
+
+    // Bottom action buttons
+    QPushButton* m_visualizeBtn;     ///< Visualize mode button
+    QPushButton* m_chartEditBtn;     ///< Chart editor button
+    QPushButton* m_gameBtn;          ///< Start game button
+    QPushButton* m_backBtn;          ///< Back button
+
+    LeaderboardManager* m_leaderboardMgr; ///< Leaderboard data source
+    QString m_selectedPath;          ///< Currently selected file path
+    bool m_analysisDone;             ///< Whether analysis is complete
+    int m_laneCount;                 ///< Selected lane count (4 or 6, default 6)
 };

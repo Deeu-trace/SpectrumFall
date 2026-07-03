@@ -4,6 +4,7 @@
 #include <QVector>
 #include <QString>
 #include <QDateTime>
+#include "NoteGenerator.h"  // for GameNote
 
 /// 谱面条目：用户编辑后的音符数据
 struct ChartEntry
@@ -12,11 +13,11 @@ struct ChartEntry
     qint64  songFileSize;   ///< 文件大小（字节），作为谱面主键
     qint64  songDurationMs; ///< 音频时长（毫秒）
     float   bpm;            ///< 检测到的 BPM
-    int     laneCount;      ///< 轨道数（始终为 6）
+    int     laneCount;      ///< 轨道数（6 或 4）
     QDateTime editedAt;     ///< 最后编辑时间
 
-    /// 音符数据：每对 [timestampMs, lane]
-    QVector<QPair<qint64, int>> notes;
+    /// 音符数据（含 noteType + holdDurationMs）
+    QVector<GameNote> notes;
 };
 
 /// 谱面管理器：JSON 文件持久化，镜像 CacheManager 范式

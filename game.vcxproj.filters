@@ -90,6 +90,9 @@
     <QtMoc Include="include\ChartTimelineWidget.h">
       <Filter>Header Files</Filter>
     </QtMoc>
+    <ClInclude Include="include\UIButtonEffects.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -168,6 +171,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\ChartTimelineWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UIButtonEffects.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -83,7 +83,7 @@ void ChartManager::loadFromDisk()
 
     QJsonObject root = doc.object();
     int version = root.value(QStringLiteral("version")).toInt(0);
-    if (version != 1) return; // 版本不匹配，忽略
+    if (version < 1 || version > 2) return; // 不支持的版本
 
     QJsonArray arr = root.value(QStringLiteral("charts")).toArray();
     for (const QJsonValue& val : arr) {
@@ -98,14 +98,17 @@ void ChartManager::loadFromDisk()
         entry.editedAt       = QDateTime::fromString(
             obj.value(QStringLiteral("editedAt")).toString(), Qt::ISODate);
 
-        // 解析音符数组
+        // 解析音符数组（v1: [ts, lane], v2: [ts, lane, type, duration]）
         QJsonArray notesArr = obj.value(QStringLiteral("notes")).toArray();
         entry.notes.reserve(notesArr.size());
         for (const QJsonValue& nv : notesArr) {
             QJsonArray pair = nv.toArray();
-            if (pair.size() == 2) {
-                entry.notes.append({static_cast<qint64>(pair[0].toDouble()),
-                                    pair[1].toInt()});
+            if (pair.size() >= 2) {
+                qint64 ts  = static_cast<qint64>(pair[0].toDouble());
+                int lane   = pair[1].toInt();
+                int type   = (pair.size() >= 3) ? pair[2].toInt() : TAP;
+                qint64 dur = (pair.size() >= 4) ? static_cast<qint64>(pair[3].toDouble()) : 0;
+                entry.notes.append(GameNote(ts, lane, type, dur));
             }
         }
 
@@ -138,11 +141,13 @@ void ChartManager::saveToDisk()
         obj[QStringLiteral("editedAt")]       = entry.editedAt.toString(Qt::ISODate);
 
         QJsonArray notesArr;
-        for (const auto& note : entry.notes) {
-            QJsonArray pair;
-            pair.append(static_cast<double>(note.first));
-            pair.append(note.second);
-            notesArr.append(pair);
+        for (const GameNote& note : entry.notes) {
+            QJsonArray arr4;
+            arr4.append(static_cast<double>(note.timestampMs));
+            arr4.append(note.lane);
+            arr4.append(note.noteType);
+            arr4.append(static_cast<double>(note.holdDurationMs));
+            notesArr.append(arr4);
         }
         obj[QStringLiteral("notes")] = notesArr;
 
@@ -150,7 +155,7 @@ void ChartManager::saveToDisk()
     }
 
     QJsonObject root;
-    root[QStringLiteral("version")] = 1;
+    root[QStringLiteral("version")] = 2;
     root[QStringLiteral("charts")]  = arr;
 
     QJsonDocument doc(root);

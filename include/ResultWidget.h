@@ -6,7 +6,7 @@ class QPushButton;
 class QLineEdit;
 class QLabel;
 
-/// 结算页面：得分、各判定数、最大连击、评级(S/A/B/C/D)、重试/返回按钮
+/// 结算页面：得分、准确率、各判定数、最大连击、评级、重试/返回按钮
 class ResultWidget : public QWidget
 {
     Q_OBJECT
@@ -26,12 +26,16 @@ public:
 signals:
     void retryRequested();
     void backRequested();
-    /// 玩家点击“记入排行榜”，携带输入的玩家名
+    /// 玩家点击"记入排行榜"，携带输入的玩家名
     void scoreSubmitted(const QString& playerName);
 
+protected:
+    void paintEvent(QPaintEvent* event) override;
+
 private:
-    QLabel* m_scoreLabel;       ///< 总分标签
     QLabel* m_gradeLabel;       ///< 评级标签
+    QLabel* m_scoreLabel;       ///< 总分标签
+    QLabel* m_accuracyLabel;    ///< 准确率标签
     QLabel* m_perfectLabel;     ///< Perfect 数量标签
     QLabel* m_goodLabel;        ///< Good 数量标签
     QLabel* m_missLabel;        ///< Miss 数量标签
@@ -42,6 +46,9 @@ private:
     QPushButton* m_retryBtn;    ///< 重试按钮
     QPushButton* m_backBtn;     ///< 返回按钮
 
+    // 缓存当前评级颜色（paintEvent 绘制背景辉光用）
+    QString m_gradeColor = "#00ff88";
+
     /// 计算评级
-    QString calculateGrade(int score, int totalNotes) const;
+    QString calculateGrade(int score, int perfect, int good, int miss, int totalNotes) const;
 };

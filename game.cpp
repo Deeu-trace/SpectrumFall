@@ -23,6 +23,133 @@
 #include <QEventLoop>
 #include <QtConcurrent>
 #include <QMessageBox>
+#include <QDebug>
+
+// ── 音符密度归一化工具：目标 ~100 音符/分钟 ──
+// 密集歌曲多剔除 TAP，稀疏歌曲不剔除，HOLD 始终保留
+static void normalizeNoteDensity(QVector<GameNote>& notes, qint64 durationMs)
+{
+    static constexpr int TARGET_NPM = 100;
+    if (durationMs <= 0 || notes.size() <= 10) return;
+
+    double minutes = durationMs / 60000.0;
+    int targetCount = static_cast<int>(TARGET_NPM * minutes);
+    if (targetCount < 30) targetCount = 30;
+
+    if (notes.size() > targetCount) {
+        int tapCount = 0;
+        for (const GameNote& n : notes) {
+            if (n.noteType != HOLD) ++tapCount;
+        }
+        int tapsToRemove = notes.size() - targetCount;
+        if (tapsToRemove > 0 && tapsToRemove < tapCount) {
+            int removeEvery = tapCount / tapsToRemove;
+            if (removeEvery < 2) removeEvery = 2;
+
+            QVector<GameNote> thinned;
+            int ti = 0;
+            for (const GameNote& note : notes) {
+                if (note.noteType == HOLD) {
+                    thinned.append(note);
+                } else {
+                    ++ti;
+                    if (ti % removeEvery != 0) {
+                        thinned.append(note);
+                    }
+                }
+            }
+            notes = thinned;
+        }
+    }
+}
+
+// ── Hold 音符合成工具：将合适位置的 TAP 转为 HOLD ──
+static void mergeHolds(QVector<GameNote>& notes)
+{
+    static constexpr qint64 HOLD_MAX_DURATION = 3000;
+    static constexpr qint64 HOLD_HEAD_BUFFER = 150;
+    static constexpr qint64 HOLD_TAIL_BUFFER = 150;
+
+    QVector<GameNote> result = notes;
+    std::sort(result.begin(), result.end(), [](const GameNote& a, const GameNote& b) {
+        return a.timestampMs < b.timestampMs;
+    });
+
+    // 估算中位间隔
+    QVector<qint64> gaps;
+    for (int i = 1; i < result.size(); ++i) {
+        gaps.append(result[i].timestampMs - result[i - 1].timestampMs);
+    }
+    qint64 medianGap = 500;
+    if (!gaps.isEmpty()) {
+        std::sort(gaps.begin(), gaps.end());
+        medianGap = gaps[gaps.size() / 2];
+    }
+
+    // 停顿 Hold 生成（减半频率）
+    int pauseConvertCount = 0;
+    for (int i = 0; i < result.size() - 1; ++i) {
+        if (result[i].noteType != TAP) continue;
+        qint64 gap = result[i + 1].timestampMs - result[i].timestampMs;
+        if (gap > 2 * medianGap && gap < 6 * medianGap) {
+            if (++pauseConvertCount % 2 == 0) continue;
+            result[i].noteType = HOLD;
+            // gap 在 [2x, 6x] medianGap 范围线性映射到 [500, 3000] ms
+            double t = static_cast<double>(gap - 2 * medianGap)
+                     / static_cast<double>(4 * medianGap);
+            t = qBound(0.0, t, 1.0);
+            result[i].holdDurationMs = static_cast<qint64>(500.0 + t * 2500.0);
+        }
+    }
+
+    // 最低 Hold 比例保障（≥5%）
+    int holdCount = 0;
+    for (const GameNote& n : result) {
+        if (n.noteType == HOLD) ++holdCount;
+    }
+    if (!result.isEmpty() && holdCount * 20 < result.size()) {
+        int tapIndex = 0;
+        for (int i = 0; i < result.size(); ++i) {
+            if (result[i].noteType != TAP) continue;
+            ++tapIndex;
+            if (tapIndex % 14 == 0) {
+                result[i].noteType = HOLD;
+                // 填充 HOLD 也做长度变化：基于 tapIndex 产生不同时长
+                double vary = static_cast<double>(tapIndex % 7) / 6.0;
+                result[i].holdDurationMs = static_cast<qint64>(
+                    600.0 + vary * (static_cast<double>(medianGap) * 4.0));
+                result[i].holdDurationMs = qBound(qint64(500),
+                    result[i].holdDurationMs, qint64(2500));
+            }
+        }
+    }
+
+    // 清理与 HOLD 重叠的音符
+    {
+        QVector<GameNote> cleaned;
+        cleaned.reserve(result.size());
+        for (int i = 0; i < result.size(); ++i) {
+            const GameNote& note = result[i];
+            bool swallowed = false;
+            for (int j = 0; j < result.size(); ++j) {
+                if (i == j) continue;
+                const GameNote& hold = result[j];
+                if (hold.noteType != HOLD) continue;
+                if (hold.lane != note.lane) continue;
+                qint64 holdStart = hold.timestampMs - HOLD_HEAD_BUFFER;
+                qint64 holdEnd = hold.timestampMs + hold.holdDurationMs + HOLD_TAIL_BUFFER;
+                if (note.timestampMs >= holdStart && note.timestampMs <= holdEnd) {
+                    swallowed = true;
+                    break;
+                }
+            }
+            if (!swallowed) cleaned.append(note);
+        }
+        result = cleaned;
+    }
+
+    notes = result;
+}
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -82,6 +209,7 @@ void MainWindow::setupUI()
     // 创建 7 个页面
     m_mainMenuPage = new MainMenuWidget(this);
     m_songSelectPage = new SongSelectWidget(this);
+    m_songSelectPage->setLeaderboardManager(m_leaderboardManager);
     m_visPage = new VisualizationWidget(m_audioEngine, this);
     m_gamePage = new GameWidget(m_audioEngine, m_scoreManager, this);
     m_resultPage = new ResultWidget(this);
@@ -189,6 +317,9 @@ void MainWindow::connectSignals()
 void MainWindow::navigateTo(int pageIndex)
 {
     m_stack->setCurrentIndex(pageIndex);
+    if (pageIndex == 1) {
+        m_songSelectPage->updateScoreHistory();
+    }
 }
 
 void MainWindow::onSongSelectRequested()
@@ -258,6 +389,8 @@ void MainWindow::onAnalyzeRequested(const QString& path)
 
         // ── Phase 3: 生成谱面（90% → 100%）──
         m_pendingNotes = generator->generate(detector->beatPoints(), 200, m_gameLaneCount);
+        normalizeNoteDensity(m_pendingNotes, engine->duration());
+        mergeHolds(m_pendingNotes);  // 分析阶段即生成 HOLD 音符
         m_analyzedBpm = detector->bpm();
         m_loadSuccess = true;
 
@@ -338,72 +471,8 @@ void MainWindow::onGameRequested()
         return;
     }
 
-    // ── 模式选择界面（内嵌 widget，非模态对话框）──
-    // 创建一个无边框半透明遮罩 widget，覆盖在歌曲选择页上
-    QWidget* overlay = new QWidget(m_songSelectPage);
-    overlay->setObjectName("modeSelectOverlay");
-    overlay->setGeometry(m_songSelectPage->rect());
-    overlay->setStyleSheet("QWidget#modeSelectOverlay { background-color: rgba(5, 5, 20, 230); }");
-
-    QVBoxLayout* ol = new QVBoxLayout(overlay);
-    ol->setAlignment(Qt::AlignCenter);
-    ol->setSpacing(20);
-
-    QLabel* title = new QLabel(QStringLiteral("选择游戏模式"), overlay);
-    title->setAlignment(Qt::AlignCenter);
-    title->setStyleSheet("font-size: 28px; font-weight: bold; color: #00ff88; background: transparent;");
-    ol->addWidget(title);
-
-    QHBoxLayout* bl = new QHBoxLayout();
-    bl->setSpacing(20);
-
-    QPushButton* btn4 = new QPushButton(QStringLiteral("4 键\n\nD  F  J  K"), overlay);
-    btn4->setMinimumSize(180, 120);
-    btn4->setStyleSheet(
-        "QPushButton { font-size: 20px; font-weight: bold; color: #e0e0e0; "
-        "  background-color: #16213e; border: 2px solid #0f3460; border-radius: 12px; }"
-        "QPushButton:hover { background-color: #1a1a40; border-color: #00ff88; color: #00ff88; }"
-    );
-    bl->addWidget(btn4);
-
-    QPushButton* btn6 = new QPushButton(QStringLiteral("6 键\n\nS  D  F  J  K  L"), overlay);
-    btn6->setMinimumSize(180, 120);
-    btn6->setStyleSheet(
-        "QPushButton { font-size: 20px; font-weight: bold; color: #e0e0e0; "
-        "  background-color: #16213e; border: 2px solid #0f3460; border-radius: 12px; }"
-        "QPushButton:hover { background-color: #1a1a40; border-color: #00ff88; color: #00ff88; }"
-    );
-    bl->addWidget(btn6);
-    ol->addLayout(bl);
-
-    QPushButton* cancelBtn = new QPushButton(QStringLiteral("取消"), overlay);
-    cancelBtn->setMinimumSize(100, 36);
-    cancelBtn->setStyleSheet(
-        "QPushButton { font-size: 14px; color: #8888aa; "
-        "  background-color: transparent; border: 1px solid #333; border-radius: 6px; }"
-        "QPushButton:hover { color: #ff5577; border-color: #ff5577; }"
-    );
-    ol->addWidget(cancelBtn);
-
-    overlay->show();
-    overlay->raise();
-
-    int mode = 0;
-    auto chooseMode = [overlay, &mode](int m) {
-        mode = m;
-        overlay->deleteLater();
-    };
-    connect(btn4, &QPushButton::clicked, [chooseMode]() { chooseMode(4); });
-    connect(btn6, &QPushButton::clicked, [chooseMode]() { chooseMode(6); });
-    connect(cancelBtn, &QPushButton::clicked, overlay, &QWidget::deleteLater);
-
-    // 嵌套事件循环，等 overlay 被 deleteLater 后退出
-    QEventLoop loop;
-    connect(overlay, &QWidget::destroyed, &loop, &QEventLoop::quit);
-    loop.exec();
-
-    if (mode == 0) return;
-    m_gameLaneCount = mode;
+    // 从歌曲选择页直接获取键数（4K/6K 已在选歌界面选择）
+    m_gameLaneCount = m_songSelectPage->selectedLaneCount();
 
     // 拷贝一份用于游戏（4K 重映射改副本，不破坏原始 6 键数据）
     m_gameNotes = m_currentNotes;
@@ -531,6 +600,7 @@ void MainWindow::onHistorySelected(const QString& filePath)
         m_currentNotes.append(GameNote(pair.first, pair.second));
     }
     m_analyzedBpm = entry->bpm;
+    mergeHolds(m_currentNotes);  // 缓存只存 TAP，需重新生成 HOLD
 
     // 更新 UI 为已分析状态
     m_songSelectPage->loadFromCache(filePath, m_analyzedBpm, entry->durationMs);
@@ -582,12 +652,18 @@ void MainWindow::onChartEditRequested()
     QVector<GameNote> notes;
     const ChartEntry* chart = m_chartManager->findChart(fileSize);
     if (chart) {
-        notes.reserve(chart->notes.size());
-        for (const auto& pair : chart->notes) {
-            notes.append(GameNote(pair.first, pair.second));
-        }
+        notes = chart->notes;
     } else {
         notes = m_currentNotes;
+    }
+
+    // 如果谱面中没有任何 HOLD 音符（旧谱面 / v1 格式 / 缓存重建），补跑 mergeHolds
+    bool hasHolds = false;
+    for (const GameNote& n : notes) {
+        if (n.noteType == HOLD) { hasHolds = true; break; }
+    }
+    if (!hasHolds && !notes.isEmpty()) {
+        mergeHolds(notes);
     }
 
     m_chartEditorPage->loadChart(notes, m_currentSongPath, fileSize, duration, m_analyzedBpm);

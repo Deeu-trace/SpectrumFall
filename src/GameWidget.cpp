@@ -25,7 +25,7 @@ static constexpr qint64 MISS_THRESHOLD = 300;   // 超过 300ms 视为 Miss（�
 // 6 键模式音符更分散，阈值更大才能产生足够 Hold
 static constexpr qint64 HOLD_MERGE_THRESHOLD_4K = 500;
 static constexpr qint64 HOLD_MERGE_THRESHOLD_6K = 800;
-static constexpr qint64 HOLD_MAX_DURATION = 2000;   // Hold 最长 2 秒，防止过长
+static constexpr qint64 HOLD_MAX_DURATION = 3000;   // Hold 最长 3 秒，防止过长
 static constexpr qint64 COUNTDOWN_MS = 3000;        // 开场 3 秒倒计时，音频延迟播放
 
 static float randFloat() {
@@ -203,7 +203,7 @@ void GameWidget::mergeHolds()
 
     // ── Step 3: 基于停顿的 Hold 生成（减半频率：只转换奇数个符合条件的 Tap）──
     // Tap 后面跟一个较长间隔（2~6 倍中位间隔）→ 这里有个"停顿"，
-    // 把这个 Tap 转成 Hold 来填充视觉空白，holdDurationMs = gap * 0.4
+    // 把这个 Tap 转成 Hold 来填充视觉空白，holdDurationMs = gap * 0.7（最低 400ms）
     int pauseConvertCount = 0;
     for (int i = 0; i < result.size() - 1; ++i) {
         if (result[i].noteType != TAP) continue;
@@ -211,7 +211,11 @@ void GameWidget::mergeHolds()
         if (gap > 2 * medianGap && gap < 6 * medianGap) {
             if (++pauseConvertCount % 2 == 0) continue;  // 跳过一半，降低频率
             result[i].noteType = HOLD;
-            result[i].holdDurationMs = qMin(static_cast<qint64>(gap * 0.4), HOLD_MAX_DURATION);
+            // gap 在 [2x, 6x] medianGap 范围线性映射到 [500, 3000] ms
+            double t = static_cast<double>(gap - 2 * medianGap)
+                     / static_cast<double>(4 * medianGap);
+            t = qBound(0.0, t, 1.0);
+            result[i].holdDurationMs = static_cast<qint64>(500.0 + t * 2500.0);
         }
     }
 
@@ -228,9 +232,46 @@ void GameWidget::mergeHolds()
             ++tapIndex;
             if (tapIndex % 14 == 0) {
                 result[i].noteType = HOLD;
-                result[i].holdDurationMs = qMin(static_cast<qint64>(medianGap * 0.75), HOLD_MAX_DURATION);
+                // 填充 HOLD 也做长度变化：基于 tapIndex 产生不同时长
+                double vary = static_cast<double>(tapIndex % 7) / 6.0;
+                result[i].holdDurationMs = static_cast<qint64>(
+                    600.0 + vary * (static_cast<double>(medianGap) * 4.0));
+                result[i].holdDurationMs = qBound(qint64(500),
+                    result[i].holdDurationMs, qint64(2500));
             }
         }
+    }
+
+    // ── Step 5: 清理与 HOLD 重叠的音符 ──
+    // 移除在 HOLD 持续期间内、同轨道上出现的其他音符
+    // HEAD buffer: HOLD 起点前 150ms 内的音符也会被吞（视觉上紧贴 HOLD 头部下落）
+    // TAIL buffer: HOLD 末端后 150ms 内的音符也会被吞（视觉上紧贴 HOLD 尾部）
+    static constexpr qint64 HOLD_HEAD_BUFFER = 150;
+    static constexpr qint64 HOLD_TAIL_BUFFER = 150;
+    {
+        QVector<GameNote> cleaned;
+        cleaned.reserve(result.size());
+        for (int i = 0; i < result.size(); ++i) {
+            const GameNote& note = result[i];
+            bool swallowed = false;
+            for (int j = 0; j < result.size(); ++j) {
+                if (i == j) continue;
+                const GameNote& hold = result[j];
+                if (hold.noteType != HOLD) continue;
+                if (hold.lane != note.lane) continue;
+                qint64 holdStart = hold.timestampMs - HOLD_HEAD_BUFFER;
+                qint64 holdEnd = hold.timestampMs + hold.holdDurationMs + HOLD_TAIL_BUFFER;
+                // 当前音符在 HOLD 的 [start-head, end+tail] 范围内 → 被吞掉
+                if (note.timestampMs >= holdStart && note.timestampMs <= holdEnd) {
+                    swallowed = true;
+                    break;
+                }
+            }
+            if (!swallowed) {
+                cleaned.append(note);
+            }
+        }
+        result = cleaned;
     }
 
     m_notes = result;
@@ -243,23 +284,54 @@ void GameWidget::startGame(const QVector<GameNote>& notes, int laneCount)
 
     // 直接使用 NoteGenerator 输出，不再做密度过滤
     m_notes = m_allNotes;
-    mergeHolds();
 
-    // 降低 TAP 音符频率到一半（不影响 HOLD）
-    // mergeHolds 已在完整音符集上完成 HOLD 生成，此处仅剔除一半 TAP
-    QVector<GameNote> thinned;
-    int tapIndex = 0;
-    for (const GameNote& note : m_notes) {
-        if (note.noteType == HOLD) {
-            thinned.append(note);          // HOLD 全部保留
-        } else {
-            if (tapIndex % 2 == 0) {
-                thinned.append(note);      // TAP 只保留一半
+    // 仅当音符中没有 HOLD 时才运行 mergeHolds（避免重复生成）
+    // 分析流水线和已保存谱面都已包含 HOLD
+    bool hasHolds = false;
+    for (const GameNote& n : m_notes) {
+        if (n.noteType == HOLD) { hasHolds = true; break; }
+    }
+    if (!hasHolds) {
+        mergeHolds();
+    }
+
+    // 动态密度归一化：目标 ~100 音符/分钟
+    // 密集歌曲多剔除，稀疏歌曲不剔除，保证不同歌曲难度一致
+    static constexpr int TARGET_NPM = 100;  // 目标每分钟音符数
+    qint64 durationMs = m_audioEngine ? m_audioEngine->duration() : 0;
+    if (durationMs > 0 && m_notes.size() > 10) {
+        double minutes = durationMs / 60000.0;
+        int targetCount = static_cast<int>(TARGET_NPM * minutes);
+        if (targetCount < 30) targetCount = 30;  // 最低保底
+
+        if (m_notes.size() > targetCount) {
+            // 计算需要移除多少个 TAP
+            int tapCount = 0;
+            for (const GameNote& n : m_notes) {
+                if (n.noteType != HOLD) ++tapCount;
             }
-            ++tapIndex;
+            int tapsToRemove = m_notes.size() - targetCount;
+            if (tapsToRemove > 0 && tapsToRemove < tapCount) {
+                // 均匀移除：每隔 removeEvery 个 TAP 删一个
+                int removeEvery = tapCount / tapsToRemove;
+                if (removeEvery < 2) removeEvery = 2;
+
+                QVector<GameNote> thinned;
+                int ti = 0;
+                for (const GameNote& note : m_notes) {
+                    if (note.noteType == HOLD) {
+                        thinned.append(note);
+                    } else {
+                        ++ti;
+                        if (ti % removeEvery != 0) {
+                            thinned.append(note);
+                        }
+                    }
+                }
+                m_notes = thinned;
+            }
         }
     }
-    m_notes = thinned;
 
     m_paused = false;
     m_gameActive = true;

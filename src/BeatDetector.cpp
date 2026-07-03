@@ -391,7 +391,8 @@ float BeatDetector::estimateBPM(const QVector<int>& peakFrames, int hopSize, int
     QVector<qint64> intervals;
     for (int i = 1; i < peakFrames.size(); ++i) {
         qint64 intervalMs = static_cast<qint64>(peakFrames[i] - peakFrames[i - 1]) * hopSize * 1000 / sampleRate;
-        if (intervalMs > 0) {
+        // 只保留音乐上合理的间隔：200ms(300BPM) ~ 2000ms(30BPM)
+        if (intervalMs >= 200 && intervalMs <= 2000) {
             intervals.append(intervalMs);
         }
     }
@@ -418,8 +419,9 @@ float BeatDetector::estimateBPM(const QVector<int>& peakFrames, int hopSize, int
     float medianIntervalMs = static_cast<float>(maxBin) * 10.0f + 5.0f;
     if (medianIntervalMs > 0) {
         float bpm = 60000.0f / medianIntervalMs;
-        if (bpm < 60.0f) bpm *= 2.0f;
-        if (bpm > 200.0f) bpm /= 2.0f;
+        // 循环校正直到 BPM 落入合理范围
+        while (bpm < 60.0f)  bpm *= 2.0f;
+        while (bpm > 200.0f) bpm /= 2.0f;
         return bpm;
     }
 

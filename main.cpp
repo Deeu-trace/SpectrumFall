@@ -1,4 +1,5 @@
 #include "game.h"
+#include "UIButtonEffects.h"
 #include <QApplication>
 #include <QFile>
 
@@ -13,6 +14,9 @@ int main(int argc, char *argv[])
         app.setStyleSheet(styleSheet);
         styleFile.close();
     }
+
+    // 初始化按钮音效 + 悬停辉光动效
+    UIButtonEffects::install(&app);
 
     MainWindow window;
     window.show();

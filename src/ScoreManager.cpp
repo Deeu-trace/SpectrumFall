@@ -102,9 +102,15 @@ QString ScoreManager::grade(int totalNotes) const
     int maxScore = totalNotes * PERFECT_SCORE;
     float ratio = static_cast<float>(m_score) / maxScore;
 
-    if (ratio >= 0.95f) return QStringLiteral("S");
-    if (ratio >= 0.80f) return QStringLiteral("A");
-    if (ratio >= 0.60f) return QStringLiteral("B");
-    if (ratio >= 0.40f) return QStringLiteral("C");
+    // φ 需要全 Perfect（AP）
+    if (m_score == maxScore && m_missCount == 0 && m_goodCount == 0)
+        return QString::fromUtf8("\xcf\x86");  // φ (UTF-8)
+
+    if (ratio >= 0.96f) return QStringLiteral("SSS");
+    if (ratio >= 0.88f) return QStringLiteral("SS");
+    if (ratio >= 0.78f) return QStringLiteral("S");
+    if (ratio >= 0.65f) return QStringLiteral("A");
+    if (ratio >= 0.50f) return QStringLiteral("B");
+    if (ratio >= 0.25f) return QStringLiteral("C");
     return QStringLiteral("D");
 }

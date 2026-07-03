@@ -121,6 +121,7 @@
     <QtMoc Include="include\ChartManager.h" />
     <QtMoc Include="include\ChartEditorWidget.h" />
     <QtMoc Include="include\ChartTimelineWidget.h" />
+    <ClInclude Include="include\UIButtonEffects.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="game.cpp" />
@@ -149,6 +150,7 @@
     <ClCompile Include="src\ChartManager.cpp" />
     <ClCompile Include="src\ChartEditorWidget.cpp" />
     <ClCompile Include="src\ChartTimelineWidget.cpp" />
+    <ClCompile Include="src\UIButtonEffects.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

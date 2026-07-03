@@ -17,97 +17,142 @@ QStackedWidget {
     background-color: #1a1a2e;
 }
 
-/* 按钮通用样式 */
+/* ═══════════════ 按钮通用 ═══════════════ */
 QPushButton {
-    background-color: #0f3460;
-    color: #e0e0e0;
-    border: 1px solid #16213e;
-    border-radius: 6px;
-    padding: 8px 16px;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #1c2e50, stop:1 #131d35);
+    color: #c8d8e8;
+    border: 1px solid #1e3560;
+    border-radius: 8px;
+    padding: 10px 22px;
     font-size: 14px;
-    min-height: 20px;
+    font-weight: 500;
+    min-height: 22px;
 }
 
 QPushButton:hover {
-    background-color: #1a4a80;
-    border-color: #00ff88;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #284878, stop:1 #1c3858);
+    border: 1px solid #00ff88;
     color: #00ff88;
 }
 
 QPushButton:pressed {
-    background-color: #0f3460;
-    border-color: #bd93f9;
-    color: #bd93f9;
+    background-color: #0c1628;
+    border: 1px solid #00cc6a;
+    color: #00cc6a;
+    padding: 12px 22px 8px 22px;
 }
 
 QPushButton:disabled {
-    background-color: #16213e;
-    color: #555555;
-    border-color: #16213e;
+    background-color: #10162a;
+    color: #3a3a50;
+    border: 1px solid #141a30;
 }
 
-/* 菜单按钮 */
+/* ═══════════════ 菜单按钮（主操作） ═══════════════ */
 QPushButton#menuButton {
-    background-color: #0f3460;
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 rgba(0,255,136,12), stop:0.5 rgba(15,52,96,200), stop:1 rgba(139,233,253,10));
     color: #00ff88;
-    border: 2px solid #00ff88;
-    border-radius: 8px;
-    padding: 12px 24px;
+    border: 2px solid rgba(0,255,136,90);
+    border-radius: 10px;
+    padding: 14px 40px;
     font-size: 18px;
     font-weight: bold;
-    min-height: 24px;
+    min-height: 28px;
 }
 
 QPushButton#menuButton:hover {
-    background-color: #00ff88;
-    color: #1a1a2e;
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 rgba(0,255,136,45), stop:0.5 rgba(20,80,140,230), stop:1 rgba(139,233,253,35));
+    border: 2px solid #00ff88;
+    color: #eeffee;
 }
 
-/* 动作按钮 */
-QPushButton#actionButton {
-    background-color: #0f3460;
+QPushButton#menuButton:pressed {
+    background-color: rgba(0,255,136,60);
+    border: 2px solid #00cc6a;
     color: #00ff88;
-    border: 1px solid #00ff88;
-    border-radius: 6px;
-    padding: 8px 16px;
+    padding: 16px 40px 12px 40px;
+}
+
+QPushButton#menuButton:disabled {
+    background-color: #10162a;
+    color: #3a3a50;
+    border: 2px solid #141a30;
+}
+
+/* ═══════════════ 动作按钮 ═══════════════ */
+QPushButton#actionButton {
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #1a3a6e, stop:1 #0f2a52);
+    color: #00ff88;
+    border: 1px solid rgba(0,255,136,70);
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 14px;
     font-weight: bold;
+    min-height: 22px;
 }
 
 QPushButton#actionButton:hover {
-    background-color: #00ff88;
-    color: #1a1a2e;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #2a5a9e, stop:1 #1a4a80);
+    border: 1px solid #00ff88;
+    color: #eeffee;
+}
+
+QPushButton#actionButton:pressed {
+    background-color: #0a1a3a;
+    border: 1px solid #00cc6a;
+    padding: 12px 20px 8px 20px;
 }
 
 QPushButton#actionButton:disabled {
-    background-color: #16213e;
-    color: #555555;
-    border-color: #16213e;
+    background-color: #10162a;
+    color: #3a3a50;
+    border: 1px solid #141a30;
 }
 
-/* 返回按钮 */
+/* ═══════════════ 返回按钮 ═══════════════ */
 QPushButton#backButton {
-    background-color: transparent;
+    background-color: rgba(189,147,249,5);
     color: #bd93f9;
+    border: 1px solid rgba(189,147,249,55);
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 14px;
+    min-height: 22px;
+}
+
+QPushButton#backButton:hover {
+    background-color: rgba(189,147,249,25);
     border: 1px solid #bd93f9;
+    color: #d4b8ff;
+}
+
+QPushButton#backButton:pressed {
+    background-color: rgba(189,147,249,50);
+    border: 1px solid #a070e0;
+    color: #a070e0;
+    padding: 12px 20px 8px 20px;
+}
+
+/* ═══════════════ 播放按钮 ═══════════════ */
+QPushButton#playButton {
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #1c2e50, stop:1 #131d35);
+    color: #e0e0e0;
+    border: 1px solid #1e3560;
     border-radius: 6px;
     padding: 8px 16px;
 }
 
-QPushButton#backButton:hover {
-    background-color: #bd93f9;
-    color: #1a1a2e;
-}
-
-/* 播放按钮 */
-QPushButton#playButton {
-    background-color: #0f3460;
-    color: #e0e0e0;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-}
-
 QPushButton#playButton:hover {
-    background-color: #1a4a80;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #284878, stop:1 #1c3858);
+    border: 1px solid #00ff88;
     color: #00ff88;
 }
 
