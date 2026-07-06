@@ -8,6 +8,7 @@
 #include <QRadialGradient>
 #include <QFont>
 #include <QFrame>
+#include <QIcon>
 
 ResultWidget::ResultWidget(QWidget* parent)
     : QWidget(parent)
@@ -16,6 +17,17 @@ ResultWidget::ResultWidget(QWidget* parent)
     layout->setAlignment(Qt::AlignCenter);
     layout->setSpacing(8);
     layout->setContentsMargins(60, 30, 60, 30);
+
+    // ── 生存模式标签 ──
+    m_survivalLabel = new QLabel(this);
+    QFont survivalFont = m_survivalLabel->font();
+    survivalFont.setPixelSize(22);
+    survivalFont.setBold(true);
+    m_survivalLabel->setFont(survivalFont);
+    m_survivalLabel->setAlignment(Qt::AlignCenter);
+    m_survivalLabel->setStyleSheet("background: transparent;");
+    m_survivalLabel->hide();
+    layout->addWidget(m_survivalLabel);
 
     // ── 评级 ──
     m_gradeLabel = new QLabel(QStringLiteral("S"), this);
@@ -135,6 +147,8 @@ ResultWidget::ResultWidget(QWidget* parent)
     m_submitBtn = new QPushButton(QStringLiteral("记入排行榜"), this);
     m_submitBtn->setMinimumSize(130, 36);
     m_submitBtn->setObjectName("actionButton");
+    m_submitBtn->setIcon(QIcon(":/icons/trophy.svg"));
+    m_submitBtn->setIconSize(QSize(20, 20));
     nameLayout->addWidget(m_submitBtn);
 
     layout->addLayout(nameLayout);
@@ -149,11 +163,15 @@ ResultWidget::ResultWidget(QWidget* parent)
     m_retryBtn = new QPushButton(QStringLiteral("重试"), this);
     m_retryBtn->setMinimumSize(140, 42);
     m_retryBtn->setObjectName("actionButton");
+    m_retryBtn->setIcon(QIcon(":/icons/replay.svg"));
+    m_retryBtn->setIconSize(QSize(20, 20));
     btnLayout->addWidget(m_retryBtn);
 
     m_backBtn = new QPushButton(QStringLiteral("返回主菜单"), this);
     m_backBtn->setMinimumSize(140, 42);
     m_backBtn->setObjectName("backButton");
+    m_backBtn->setIcon(QIcon(":/icons/arrow-left.svg"));
+    m_backBtn->setIconSize(QSize(20, 20));
     btnLayout->addWidget(m_backBtn);
 
     btnLayout->addStretch();
@@ -208,6 +226,9 @@ void ResultWidget::paintEvent(QPaintEvent* event)
 
 void ResultWidget::setResult(int score, int perfect, int good, int miss, int maxCombo, int totalNotes)
 {
+    // 默认隐藏生存模式标签（setSurvivalResult 会重新显示）
+    m_survivalLabel->hide();
+
     int maxScore = totalNotes * 300;
     float ratio = (totalNotes > 0) ? static_cast<float>(score) / maxScore : 0.0f;
     float accuracy = ratio * 100.0f;
@@ -255,6 +276,22 @@ void ResultWidget::setResult(int score, int perfect, int good, int miss, int max
     m_submitBtn->setText(QStringLiteral("记入排行榜"));
     m_rankLabel->setText(QStringLiteral("完成一曲，记入排行榜？"));
     m_rankLabel->setStyleSheet("color: #8888aa; font-size: 16px; background: transparent;");
+}
+
+void ResultWidget::setSurvivalResult(bool survived)
+{
+    m_survivalLabel->show();
+    if (survived) {
+        m_survivalLabel->setText(QString::fromUtf8(
+            "\xe7\x94\x9f\xe5\xad\x98\xe6\xa8\xa1\xe5\xbc\x8f \xe2\x80\x94 \xe9\x80\x9a\xe5\x85\xb3"));
+        m_survivalLabel->setStyleSheet(
+            "color: #00ff88; font-size: 22px; font-weight: bold; background: transparent;");
+    } else {
+        m_survivalLabel->setText(QString::fromUtf8(
+            "\xe7\x94\x9f\xe5\xad\x98\xe6\xa8\xa1\xe5\xbc\x8f \xe2\x80\x94 \xe5\xa4\xb1\xe8\xb4\xa5"));
+        m_survivalLabel->setStyleSheet(
+            "color: #e94560; font-size: 22px; font-weight: bold; background: transparent;");
+    }
 }
 
 QString ResultWidget::calculateGrade(int score, int perfect, int good, int miss, int totalNotes) const

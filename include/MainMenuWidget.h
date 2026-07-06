@@ -17,6 +17,7 @@ public:
 signals:
     void songSelectRequested();
     void leaderboardRequested();
+    void themeEditRequested();
     void exitRequested();
 
 protected:
@@ -25,6 +26,7 @@ protected:
 private:
     QPushButton* m_selectSongBtn;   ///< 选择歌曲按钮
     QPushButton* m_leaderboardBtn;  ///< 排行榜按钮
+    QPushButton* m_themeBtn;        ///< 主题按钮
     QPushButton* m_exitBtn;         ///< 退出按钮
 
     float m_bgPhase;                ///< 全局动画相位

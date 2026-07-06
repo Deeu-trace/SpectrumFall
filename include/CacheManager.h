@@ -13,6 +13,8 @@ struct CacheEntry
     qint64  fileSize;      ///< 文件大小（字节），用于检测文件是否被替换
     qint64  durationMs;    ///< 音频时长（毫秒）
     float   bpm;           ///< 检测到的 BPM
+    float   lowFreqRatio;  ///< 低频能量占比 (0-1)，用于情绪分类
+    float   avgEnergy;     ///< 平均能量 (0-1)，用于情绪分类
     QDateTime analyzedAt;  ///< 最后分析时间
 
     /// 音符数据：每对 [timestampMs, lane]

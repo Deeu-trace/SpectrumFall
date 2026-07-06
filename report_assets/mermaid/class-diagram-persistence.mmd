@@ -1,0 +1,81 @@
+classDiagram
+    direction LR
+
+    class CacheManager {
+        -QString m_cachePath
+        -QVector~CacheEntry~ m_entries
+        +const CacheEntry* find(QString filePath)
+        +void upsert(CacheEntry)
+        +void remove(QString filePath)
+        +bool hasValidCache(QString filePath)
+    }
+
+    class CacheEntry {
+        +QString filePath
+        +QString fileName
+        +qint64 fileSize
+        +qint64 durationMs
+        +float bpm
+        +float lowFreqRatio
+        +float avgEnergy
+        +QDateTime analyzedAt
+        +QVector~QPair~qint64,int~~ notes
+    }
+
+    class ChartManager {
+        -QString m_path
+        -QVector~ChartEntry~ m_entries
+        +bool hasChart(qint64 songFileSize)
+        +const ChartEntry* findChart(qint64 songFileSize)
+        +void saveChart(ChartEntry)
+        +void removeChart(qint64 songFileSize)
+    }
+
+    class ChartEntry {
+        +QString songFileName
+        +qint64 songFileSize
+        +qint64 songDurationMs
+        +float bpm
+        +int laneCount
+        +QDateTime editedAt
+        +QVector~GameNote~ notes
+    }
+
+    class LeaderboardManager {
+        -QString m_path
+        -QVector~LeaderboardEntry~ m_entries
+        -QString m_myName
+        +QVector~LeaderboardEntry~ entriesForSong(qint64, int, bool)
+        +int addEntry(LeaderboardEntry)
+        +void removeEntry(QDateTime, QString, int)
+        +int exportToFile(QString) importFromFile(QString)
+    }
+
+    class LeaderboardEntry {
+        +QString songFileName
+        +qint64 songFileSize
+        +int laneCount
+        +bool survival
+        +QString playerName
+        +int score
+        +int perfect good miss
+        +int maxCombo
+        +QString grade
+        +QDateTime playedAt
+    }
+
+    class GameNote {
+        +qint64 timestampMs
+        +int lane
+        +int noteType
+        +qint64 holdDurationMs
+        +bool judged
+        +int judgment
+        +bool holdActive
+        +bool holdFinished
+    }
+
+    CacheManager --> CacheEntry
+    ChartManager --> ChartEntry
+    LeaderboardManager --> LeaderboardEntry
+    ChartEntry --> GameNote

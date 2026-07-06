@@ -17,6 +17,9 @@ public:
     /// 设置结算数据
     void setResult(int score, int perfect, int good, int miss, int maxCombo, int totalNotes);
 
+    /// 设置生存模式结果（true=通关，false=血尽失败）
+    void setSurvivalResult(bool survived);
+
     /// 预填玩家名（来自上次记录）
     void presetName(const QString& name);
 
@@ -33,6 +36,7 @@ protected:
     void paintEvent(QPaintEvent* event) override;
 
 private:
+    QLabel* m_survivalLabel;    ///< 生存模式状态标签（通关/失败）
     QLabel* m_gradeLabel;       ///< 评级标签
     QLabel* m_scoreLabel;       ///< 总分标签
     QLabel* m_accuracyLabel;    ///< 准确率标签

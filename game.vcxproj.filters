@@ -90,6 +90,12 @@
     <QtMoc Include="include\ChartTimelineWidget.h">
       <Filter>Header Files</Filter>
     </QtMoc>
+    <QtMoc Include="include\ThemeManager.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="include\ThemeEditorWidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
     <ClInclude Include="include\UIButtonEffects.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -171,6 +177,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\ChartTimelineWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ThemeManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ThemeEditorWidget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\UIButtonEffects.cpp">

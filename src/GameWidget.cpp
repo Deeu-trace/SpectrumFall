@@ -1,6 +1,7 @@
 #include "GameWidget.h"
 #include "AudioEngine.h"
 #include "ScoreManager.h"
+#include "ThemeManager.h"
 
 #include <QPainter>
 #include <QPaintEvent>
@@ -15,6 +16,7 @@
 #include <random>
 #include <algorithm>
 #include <QPixmap>
+#include <QIcon>
 
 // 判定线和轨道参数常量
 static constexpr qreal SCROLL_SPEED = 0.35;     // 像素/毫秒（下落速度，降低让玩家有更多反应时间）
@@ -71,25 +73,19 @@ GameWidget::GameWidget(AudioEngine* audioEngine, ScoreManager* scoreManager, QWi
 
     connect(m_renderTimer, &QTimer::timeout, this, &GameWidget::onRenderTick);
 
+    // 主题切换时重建背景缓存
+    connect(ThemeManager::instance(), &ThemeManager::gameThemeChanged,
+            this, [this](const ThemePalette&) {
+        rebuildBackground();
+        update();
+    });
+
     if (m_scoreManager) {
         // 渲染定时器已经以 60Hz 调用 update()，不需要额外触发
     }
 
     generateStars();
     setupPauseOverlay();
-
-    // 测试按钮：跳转到歌曲结束前 10 秒（便于快速测试结算/排行榜流程）
-    m_testSkipBtn = new QPushButton(QStringLiteral("测试：跳到结尾"), this);
-    m_testSkipBtn->setObjectName("testSkipBtn");
-    m_testSkipBtn->setFocusPolicy(Qt::NoFocus);   // 不抢游戏键盘焦点
-    m_testSkipBtn->setCursor(Qt::PointingHandCursor);
-    m_testSkipBtn->setStyleSheet(
-        "QPushButton { color: #ffe066; background-color: rgba(20,20,40,210); "
-        "border: 1px solid #555; border-radius: 6px; padding: 2px 10px; font-size: 12px; }"
-        "QPushButton:hover { color: #ffffff; border-color: #00ff88; background-color: rgba(0,80,40,210); }");
-    m_testSkipBtn->setGeometry(width() - 140, 6, 130, 26);
-    m_testSkipBtn->hide();
-    connect(m_testSkipBtn, &QPushButton::clicked, this, &GameWidget::skipToEndTest);
 }
 
 void GameWidget::generateStars()
@@ -116,16 +112,18 @@ void GameWidget::rebuildBackground()
     p.setRenderHint(QPainter::Antialiasing);
 
     // 深色径向渐变背景
+    ThemePalette tp = ThemeManager::instance()->gamePalette();
     QRadialGradient bgGrad(w / 2.0, h / 2.0, w * 0.7);
-    bgGrad.setColorAt(0.0, QColor(18, 16, 45));
-    bgGrad.setColorAt(1.0, QColor(5, 5, 18));
+    bgGrad.setColorAt(0.0, QColor(tp.visBg));
+    bgGrad.setColorAt(1.0, QColor(tp.visBgDeep));
     p.fillRect(m_bgCache.rect(), bgGrad);
 
     // 静态星光（不闪烁的基础层）
     p.setPen(Qt::NoPen);
+    QColor starColor(tp.primary);
     for (int i = 0; i < m_stars.size(); ++i) {
         int sz = (i % 5 == 0) ? 2 : 1;
-        p.setBrush(QColor(140, 180, 255, 80));
+        p.setBrush(QColor(starColor.red(), starColor.green(), starColor.blue(), 80));
         p.drawEllipse(QPointF(m_stars[i].x() * w, m_stars[i].y() * h), sz, sz);
     }
 }
@@ -152,12 +150,16 @@ void GameWidget::setupPauseOverlay()
     m_continueBtn = new QPushButton(QStringLiteral("继续游戏"), m_pauseOverlay);
     m_continueBtn->setMinimumSize(200, 50);
     m_continueBtn->setObjectName("menuButton");
+    m_continueBtn->setIcon(QIcon(":/icons/play.svg"));
+    m_continueBtn->setIconSize(QSize(20, 20));
     btnLayout->addWidget(m_continueBtn);
 
     // "返回主菜单" 按钮
     m_backToMenuBtn = new QPushButton(QStringLiteral("返回主菜单"), m_pauseOverlay);
     m_backToMenuBtn->setMinimumSize(200, 50);
     m_backToMenuBtn->setObjectName("actionButton");
+    m_backToMenuBtn->setIcon(QIcon(":/icons/arrow-left.svg"));
+    m_backToMenuBtn->setIconSize(QSize(20, 20));
     btnLayout->addWidget(m_backToMenuBtn);
 
     mainLayout->addLayout(btnLayout);
@@ -174,7 +176,6 @@ void GameWidget::setupPauseOverlay()
         m_renderTimer->stop();
         m_pauseOverlay->hide();
         m_audioEngine->pause();
-        if (m_testSkipBtn) m_testSkipBtn->hide();
         emit backRequested();
     });
 }
@@ -277,10 +278,28 @@ void GameWidget::mergeHolds()
     m_notes = result;
 }
 
-void GameWidget::startGame(const QVector<GameNote>& notes, int laneCount)
+void GameWidget::startGame(const QVector<GameNote>& notes, int laneCount, bool survival)
 {
     m_laneCount = qBound(4, laneCount, 6);
     m_allNotes = notes;
+    m_survivalMode = survival;
+
+    // 生存模式：根据谱面难度设置初始血量
+    if (m_survivalMode) {
+        // 高难度（多音符/快BPM）→ 较低初始血 + 较高扣血
+        // 这里简化：固定 100 HP，miss 扣 15
+        m_maxHp = 100;
+        m_hp = m_maxHp;
+        m_displayHp = static_cast<qreal>(m_maxHp);
+        m_hpFlashTimer = 0;
+        m_prevPerfect = 0;
+        m_prevGood = 0;
+        m_prevMiss = 0;
+        m_lastHpCombo = 0;
+    } else {
+        m_hp = 0;
+        m_displayHp = 0;
+    }
 
     // 直接使用 NoteGenerator 输出，不再做密度过滤
     m_notes = m_allNotes;
@@ -365,43 +384,6 @@ void GameWidget::startGame(const QVector<GameNote>& notes, int laneCount)
     // 预建背景缓存
     rebuildBackground();
 
-    // 显示测试按钮
-    if (m_testSkipBtn) {
-        m_testSkipBtn->show();
-        m_testSkipBtn->raise();
-    }
-}
-
-void GameWidget::skipToEndTest()
-{
-    if (!m_gameActive || m_paused) return;
-    if (!m_audioEngine || m_audioEngine->duration() <= 0) return;
-
-    qint64 dur = m_audioEngine->duration();
-    qint64 target = qMax<qint64>(0, dur - 10000);
-
-    // 跳过开场倒计时（如果还在进行中）
-    m_audioStarted = true;
-
-    // 静默跳过目标时间之前的所有音符（不计分、不计 Miss）
-    for (GameNote& note : m_notes) {
-        if (!note.judged && note.timestampMs < target) {
-            note.judged = true;
-        }
-    }
-    m_activeHolds.clear();
-
-    // 将游戏时钟重基准到目标时间，使 getGameTime() 立即返回 target
-    m_startPosMs = target;
-    m_totalPausedMs = 0;
-    m_pauseElapsedMs = 0;
-    m_gameClock.restart();
-
-    // 音频同步跳转到目标位置并继续播放
-    m_audioEngine->seek(target);
-    m_audioEngine->play();
-
-    setFocus();
 }
 
 void GameWidget::pauseGame()
@@ -437,17 +419,14 @@ void GameWidget::resizeEvent(QResizeEvent* event)
     if (m_pauseOverlay) {
         m_pauseOverlay->setGeometry(0, 0, width(), height());
     }
-    if (m_testSkipBtn) {
-        m_testSkipBtn->setGeometry(width() - 140, 6, 130, 26);
-    }
     // 标记背景缓存需要重建（paintEvent 中会检测并重建）
 }
 
 qint64 GameWidget::getGameTime() const
 {
     if (!m_gameClock.isValid()) return 0;
-    qint64 elapsed = m_gameClock.elapsed();
-    // 减去累计暂停时间，得到实际游戏时间（可为负，用于开场倒计时）
+    // 暂停时使用保存的暂停时刻，冻结游戏时间
+    qint64 elapsed = m_paused ? m_pauseElapsedMs : m_gameClock.elapsed();
     return elapsed - m_totalPausedMs + m_startPosMs;
 }
 
@@ -474,6 +453,8 @@ void GameWidget::paintEvent(QPaintEvent* event)
 
     // 动态闪烁星光（只画大星的十字光芒，减少计算量）
     painter.setPen(Qt::NoPen);
+    ThemePalette pal = ThemeManager::instance()->gamePalette();
+    QColor twinkleColor(pal.primary);
     for (int i = 0; i < m_stars.size(); ++i) {
         if (i % 7 != 0) continue;  // 只画大星
         float twinkle = 0.3f + 0.7f * (0.5f + 0.5f * std::sin(timeSec * (0.8f + m_starPhases[i] * 0.3f) + m_starPhases[i]));
@@ -481,20 +462,21 @@ void GameWidget::paintEvent(QPaintEvent* event)
         int alpha = static_cast<int>(120 * twinkle);
         qreal sx = m_stars[i].x() * w;
         qreal sy = m_stars[i].y() * h;
-        painter.setBrush(QColor(140, 180, 255, alpha));
+        painter.setBrush(QColor(twinkleColor.red(), twinkleColor.green(), twinkleColor.blue(), alpha));
         painter.drawEllipse(QPointF(sx, sy), 2, 2);
-        painter.setPen(QPen(QColor(140, 180, 255, alpha / 2), 0.5));
+        painter.setPen(QPen(QColor(twinkleColor.red(), twinkleColor.green(), twinkleColor.blue(), alpha / 2), 0.5));
         painter.drawLine(QPointF(sx - 4, sy), QPointF(sx + 4, sy));
         painter.drawLine(QPointF(sx, sy - 4), QPointF(sx, sy + 4));
         painter.setPen(Qt::NoPen);
     }
 
     // 低音波纹（从判定线中心扩散）
+    QColor rippleColor(pal.secondary);
     for (int r = 0; r < 3; ++r) {
         float waveTime = std::fmod(timeSec * 0.4f + r * 0.333f, 1.0f);
         qreal waveR = waveTime * w * 0.5;
         int waveAlpha = static_cast<int>(60 * (1.0f - waveTime) * (waveTime > 0.05f ? 1.0f : waveTime / 0.05f));
-        painter.setBrush(QColor(30, 80, 150, waveAlpha));
+        painter.setBrush(QColor(rippleColor.red(), rippleColor.green(), rippleColor.blue(), waveAlpha));
         painter.drawEllipse(QPointF(w / 2.0, h * m_judgeLineY), waveR, waveR * 0.3);
     }
 
@@ -660,19 +642,20 @@ void GameWidget::paintEvent(QPaintEvent* event)
 
     // ═══ 5. 判定线 ═══
     qreal glowH = 18;
+    QColor jlColor(pal.judgeLine);
 
     QLinearGradient judgeGlow(startX, judgeY - glowH, startX, judgeY + glowH);
-    judgeGlow.setColorAt(0.0, QColor(0, 255, 136, 0));
-    judgeGlow.setColorAt(0.4, QColor(0, 255, 136, 80));
-    judgeGlow.setColorAt(0.5, QColor(0, 255, 136, 220));
-    judgeGlow.setColorAt(0.6, QColor(0, 255, 136, 80));
-    judgeGlow.setColorAt(1.0, QColor(0, 255, 136, 0));
+    judgeGlow.setColorAt(0.0, QColor(jlColor.red(), jlColor.green(), jlColor.blue(), 0));
+    judgeGlow.setColorAt(0.4, QColor(jlColor.red(), jlColor.green(), jlColor.blue(), 80));
+    judgeGlow.setColorAt(0.5, QColor(jlColor.red(), jlColor.green(), jlColor.blue(), 220));
+    judgeGlow.setColorAt(0.6, QColor(jlColor.red(), jlColor.green(), jlColor.blue(), 80));
+    judgeGlow.setColorAt(1.0, QColor(jlColor.red(), jlColor.green(), jlColor.blue(), 0));
     painter.setPen(Qt::NoPen);
     painter.setBrush(judgeGlow);
     painter.drawRect(QRectF(startX, judgeY - glowH, totalTrackWidth, glowH * 2));
 
     // 判定线主线
-    painter.setPen(QPen(QColor(0, 255, 136, 255), 2));
+    painter.setPen(QPen(jlColor, 2));
     painter.drawLine(QPointF(startX, judgeY), QPointF(startX + totalTrackWidth, judgeY));
 
     // 按键时轨道底部高亮
@@ -761,7 +744,8 @@ void GameWidget::paintEvent(QPaintEvent* event)
         painter.drawRoundedRect(QRectF(barX, barY, barW, barH), 2, 2);
 
         // 已播放部分
-        painter.setBrush(QColor(0, 255, 136, 220));
+        QColor progColor(pal.primary);
+        painter.setBrush(QColor(progColor.red(), progColor.green(), progColor.blue(), 220));
         painter.drawRoundedRect(QRectF(barX, barY, barW * progress, barH), 2, 2);
     }
 
@@ -769,7 +753,8 @@ void GameWidget::paintEvent(QPaintEvent* event)
     hudFont.setPixelSize(20);
     painter.setFont(hudFont);
     painter.setPen(QColor(255, 255, 255));
-    painter.drawText(15, 30, QStringLiteral("分数: %1").arg(
+    int scoreY = m_survivalMode ? 52 : 30;
+    painter.drawText(15, scoreY, QStringLiteral("分数: %1").arg(
         m_scoreManager ? m_scoreManager->score() : 0));
 
     // Combo 大字动画
@@ -779,10 +764,12 @@ void GameWidget::paintEvent(QPaintEvent* event)
         hudFont.setBold(true);
         painter.setFont(hudFont);
 
-        // Combo 颜色：越高越炫
+        // Combo 颜色：越高越炫（主题色渐变）
+        QColor cPrimary(pal.primary);
+        QColor cSecondary(pal.secondary);
         QColor comboColor;
-        if (combo < 10) comboColor = QColor(0, 255, 136);
-        else if (combo < 30) comboColor = QColor(100, 200, 255);
+        if (combo < 10) comboColor = cPrimary;
+        else if (combo < 30) comboColor = cSecondary;
         else if (combo < 50) comboColor = QColor(180, 120, 255);
         else if (combo < 100) comboColor = QColor(255, 180, 50);
         else comboColor = QColor(255, 80, 120);
@@ -817,6 +804,9 @@ void GameWidget::paintEvent(QPaintEvent* event)
     hudFont.setPixelSize(12);
     painter.setFont(hudFont);
     painter.drawText(w - 100, h - 10, QStringLiteral("ESC 暂停"));
+
+    // ── 生存模式血条 ──
+    drawHealthBar(painter);
 
     // ── 开场倒计时数字（game time < 0 时显示）──
     if (gameTime < 0) {
@@ -944,6 +934,49 @@ void GameWidget::onRenderTick()
     // 检查超时未击打的音符
     checkMissedNotes();
 
+    // ── 生存模式：通过判定计数差值更新血量 ──
+    if (m_survivalMode && m_scoreManager) {
+        int curP = m_scoreManager->perfectCount();
+        int curG = m_scoreManager->goodCount();
+        int curM = m_scoreManager->missCount();
+        int dP = curP - m_prevPerfect;
+        int dG = curG - m_prevGood;
+        int dM = curM - m_prevMiss;
+        if (dP > 0 || dG > 0 || dM > 0) {
+            // 只有 Miss 扣血，Perfect/Good 不单独回血（回血靠连击里程碑）
+            int delta = -dM * 15;
+            if (delta < 0) applyHpChange(delta);
+            m_prevPerfect = curP;
+            m_prevGood = curG;
+            m_prevMiss = curM;
+        }
+
+        // 连击回血：每达到 10 连击里程碑回血，高连击奖励更多
+        int curCombo = m_scoreManager->combo();
+        int newMilestone = curCombo / 10;
+        int oldMilestone = m_lastHpCombo / 10;
+        if (newMilestone > oldMilestone && curCombo > 0) {
+            int recovery = 5;
+            if (curCombo >= 100) recovery = 15;
+            else if (curCombo >= 50) recovery = 10;
+            else if (curCombo >= 25) recovery = 8;
+            applyHpChange(recovery);
+            m_lastHpCombo = curCombo;
+        }
+        // Miss 断连后重置连击里程碑
+        if (curCombo == 0 && m_lastHpCombo > 0) {
+            m_lastHpCombo = 0;
+        }
+        // 生存模式 Game Over
+        if (m_hp <= 0) {
+            m_gameActive = false;
+            m_renderTimer->stop();
+            m_audioEngine->pause();
+            emit gameOver();
+            return;
+        }
+    }
+
     // Hold 持续粒子效果：每几帧为活跃 Hold 生成小粒子
     m_holdSparkleCounter++;
     if (m_holdSparkleCounter >= 3) {
@@ -990,7 +1023,6 @@ void GameWidget::onRenderTick()
                 m_gameActive = false;
                 m_renderTimer->stop();
                 m_audioEngine->pause();
-                if (m_testSkipBtn) m_testSkipBtn->hide();
                 emit gameFinished();
                 return;
             }
@@ -1182,16 +1214,10 @@ void GameWidget::judgeHoldRelease(int lane)
 
 QColor GameWidget::laneColor(int lane) const
 {
-    switch (lane) {
-    case 0: return m_laneCount == 4 ? QColor(0, 255, 136)   // 4键 D: 荧光绿
-                                    : QColor(0, 240, 255);  // 6键 S: 青色
-    case 1: return QColor(0, 255, 136);   // D: 荧光绿
-    case 2: return QColor(189, 147, 249); // F: 浅紫
-    case 3: return QColor(139, 233, 253); // J: 浅蓝
-    case 4: return QColor(255, 121, 198); // K: 粉色
-    case 5: return QColor(255, 180, 50);  // L: 金色
-    default: return QColor(255, 255, 255);
-    }
+    ThemePalette tp = ThemeManager::instance()->gamePalette();
+    if (lane >= 0 && lane < 6)
+        return tp.laneColors[lane];
+    return QColor(255, 255, 255);
 }
 
 qreal GameWidget::laneX(int lane) const
@@ -1355,4 +1381,95 @@ void GameWidget::updateEffects(qint64 deltaTimeMs)
             m_popups.removeAt(i);
         }
     }
+}
+
+// ── 生存模式：血量变化 ──────────────────────────────────────────
+void GameWidget::applyHpChange(int delta)
+{
+    m_hp = qBound(0, m_hp + delta, m_maxHp);
+    if (delta < 0) {
+        m_hpFlashTimer = 8;  // 受击闪红 8 帧
+    }
+}
+
+// ── 生存模式：绘制血条（左上角）─────────────────────────────────
+void GameWidget::drawHealthBar(QPainter& p)
+{
+    if (!m_survivalMode) return;
+
+    // 平滑插值显示血量
+    qreal target = static_cast<qreal>(m_hp);
+    m_displayHp += (target - m_displayHp) * 0.15;
+    if (qAbs(m_displayHp - target) < 0.5) m_displayHp = target;
+
+    qreal ratio = m_displayHp / static_cast<qreal>(m_maxHp);
+
+    // 血条尺寸
+    int barX = 20;
+    int barY = 16;
+    int barW = 180;
+    int barH = 14;
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+
+    // 背景槽
+    QColor bgColor(20, 20, 35, 200);
+    p.setPen(Qt::NoPen);
+    p.setBrush(bgColor);
+    p.drawRoundedRect(barX - 2, barY - 2, barW + 4, barH + 4, 8, 8);
+
+    // 受击闪红
+    if (m_hpFlashTimer > 0) {
+        m_hpFlashTimer--;
+        QColor flash(255, 50, 50, 60);
+        p.setBrush(flash);
+        p.drawRoundedRect(barX - 2, barY - 2, barW + 4, barH + 4, 8, 8);
+    }
+
+    // 血量条（颜色随比例变化：绿→黄→红）
+    QColor barColor;
+    if (ratio > 0.6) {
+        barColor = QColor(0, 230, 100);        // 绿色
+    } else if (ratio > 0.3) {
+        barColor = QColor(255, 200, 50);        // 黄色
+    } else {
+        barColor = QColor(255, 60, 60);         // 红色
+    }
+
+    int fillW = static_cast<int>(barW * ratio);
+    if (fillW > 0) {
+        // 渐变效果
+        QLinearGradient grad(barX, barY, barX, barY + barH);
+        grad.setColorAt(0, barColor.lighter(130));
+        grad.setColorAt(1, barColor);
+        p.setBrush(grad);
+        p.drawRoundedRect(barX, barY, fillW, barH, 6, 6);
+
+        // 高光条
+        QColor highlight(255, 255, 255, 40);
+        p.setBrush(highlight);
+        p.drawRoundedRect(barX, barY, fillW, barH / 3, 6, 6);
+    }
+
+    // 边框
+    p.setPen(QPen(QColor(255, 255, 255, 30), 1));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(barX, barY, barW, barH, 6, 6);
+
+    // HP 文字
+    p.setPen(QColor(255, 255, 255, 180));
+    QFont font = p.font();
+    font.setPixelSize(11);
+    font.setBold(true);
+    p.setFont(font);
+    p.drawText(barX + barW + 8, barY, 40, barH, Qt::AlignVCenter | Qt::AlignLeft,
+               QString::number(m_hp));
+
+    // 心形图标
+    p.setPen(barColor);
+    p.drawText(barX - 18, barY - 1, 16, barH + 2, Qt::AlignCenter,
+               QString::fromUtf8("\xe2\x99\xa5"));
+
+    p.restore();
 }

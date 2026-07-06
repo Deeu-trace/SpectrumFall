@@ -1,5 +1,6 @@
 #define _USE_MATH_DEFINES
 #include "CircularSpectrumVisualizer.h"
+#include "ThemeManager.h"
 #include <QPainter>
 #include <QPaintEvent>
 #include <cmath>
@@ -27,8 +28,10 @@ void CircularSpectrumVisualizer::paintEvent(QPaintEvent* event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
+    ThemePalette p = ThemeManager::instance()->gamePalette();
+
     // 背景
-    painter.fillRect(rect(), QColor(26, 26, 46));
+    painter.fillRect(rect(), QColor(p.visBg));
 
     if (m_magnitude.isEmpty()) {
         return;
@@ -41,10 +44,11 @@ void CircularSpectrumVisualizer::paintEvent(QPaintEvent* event)
     float maxOuterRadius = qMin(w, h) * 0.42f;
 
     // 绘制中心圆环
+    QColor glowColor(p.surfaceBorder);
     QRadialGradient centerGlow(center, innerRadius * 1.5);
-    centerGlow.setColorAt(0.0, QColor(15, 52, 96, 180));
-    centerGlow.setColorAt(0.6, QColor(15, 52, 96, 80));
-    centerGlow.setColorAt(1.0, QColor(15, 52, 96, 0));
+    centerGlow.setColorAt(0.0, QColor(glowColor.red(), glowColor.green(), glowColor.blue(), 180));
+    centerGlow.setColorAt(0.6, QColor(glowColor.red(), glowColor.green(), glowColor.blue(), 80));
+    centerGlow.setColorAt(1.0, QColor(glowColor.red(), glowColor.green(), glowColor.blue(), 0));
     painter.setPen(Qt::NoPen);
     painter.setBrush(centerGlow);
     painter.drawEllipse(center, innerRadius * 1.5, innerRadius * 1.5);
@@ -72,12 +76,15 @@ void CircularSpectrumVisualizer::paintEvent(QPaintEvent* event)
             center.y() + (innerRadius + barLength) * std::sin(angle)
         );
 
-        // 颜色：低频绿，高频紫
+        // 颜色：低频 primary，高频 secondary
         float t = static_cast<float>(i) / segCount;
-        QColor barColor;
-        barColor.setRedF(0.0f + t * 0.74f);
-        barColor.setGreenF(1.0f - t * 0.15f);
-        barColor.setBlueF(0.53f + t * 0.47f);
+        QColor c1(p.primary);
+        QColor c2(p.secondary);
+        QColor barColor(
+            static_cast<int>(c1.red()   + (c2.red()   - c1.red())   * t),
+            static_cast<int>(c1.green() + (c2.green() - c1.green()) * t),
+            static_cast<int>(c1.blue()  + (c2.blue()  - c1.blue())  * t)
+        );
         barColor.setAlphaF(0.6f + val * 0.4f);
 
         QPen pen(barColor, qMax(1.0f, angleStep * innerRadius * M_PI / 180.0f * 0.6f));
@@ -87,7 +94,8 @@ void CircularSpectrumVisualizer::paintEvent(QPaintEvent* event)
     }
 
     // 中心文字（可选装饰）
-    painter.setPen(QColor(0, 255, 136, 150));
+    QColor textColor(p.primary);
+    painter.setPen(QColor(textColor.red(), textColor.green(), textColor.blue(), 150));
     QFont font = painter.font();
     font.setPixelSize(static_cast<int>(innerRadius * 0.22));
     font.setBold(true);

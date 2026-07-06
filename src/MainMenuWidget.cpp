@@ -53,6 +53,7 @@ MainMenuWidget::MainMenuWidget(QWidget* parent)
 
     m_selectSongBtn  = makeBtn(QStringLiteral("开 始 游 戏"));
     m_leaderboardBtn = makeBtn(QStringLiteral("排  行  榜"));
+    m_themeBtn       = makeBtn(QStringLiteral("主    题"));
     m_exitBtn        = makeBtn(QStringLiteral("退    出"));
 
     // 去掉最后一个多余的 spacing
@@ -61,6 +62,7 @@ MainMenuWidget::MainMenuWidget(QWidget* parent)
     // 信号
     connect(m_selectSongBtn,  &QPushButton::clicked, this, &MainMenuWidget::songSelectRequested);
     connect(m_leaderboardBtn, &QPushButton::clicked, this, &MainMenuWidget::leaderboardRequested);
+    connect(m_themeBtn,       &QPushButton::clicked, this, &MainMenuWidget::themeEditRequested);
     connect(m_exitBtn,        &QPushButton::clicked, this, &MainMenuWidget::exitRequested);
 
     // 动画定时器 ~60fps

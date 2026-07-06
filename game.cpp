@@ -13,6 +13,8 @@
 #include "LeaderboardManager.h"
 #include "ChartEditorWidget.h"
 #include "ChartManager.h"
+#include "ThemeManager.h"
+#include "ThemeEditorWidget.h"
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -24,6 +26,7 @@
 #include <QtConcurrent>
 #include <QMessageBox>
 #include <QDebug>
+#include <QSet>
 
 // ── 音符密度归一化工具：目标 ~100 音符/分钟 ──
 // 密集歌曲多剔除 TAP，稀疏歌曲不剔除，HOLD 始终保留
@@ -151,6 +154,22 @@ static void mergeHolds(QVector<GameNote>& notes)
     notes = result;
 }
 
+// ── 情绪分类：根据音频特征推断主题 ──
+static Mood classifyMood(float bpm, float lowFreqRatio, float avgEnergy)
+{
+    // 激昂：高 BPM + 高能量
+    if (bpm >= 150 && avgEnergy >= 0.5f) return Mood::Energetic;
+    // 低沉：低 BPM + 低能量 + 低频主导
+    if (bpm < 100 && avgEnergy < 0.4f && lowFreqRatio > 0.5f) return Mood::Melancholic;
+    // 舒缓：中低 BPM + 低能量
+    if (bpm < 130 && avgEnergy < 0.35f) return Mood::Calm;
+    // 欢快：中高 BPM + 中等能量
+    if (bpm >= 120 && avgEnergy >= 0.35f) return Mood::Cheerful;
+    // 高能量但 BPM 不高也算激昂
+    if (avgEnergy >= 0.6f && bpm >= 130) return Mood::Energetic;
+    return Mood::Default;
+}
+
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_stack(new QStackedWidget(this))
@@ -168,15 +187,34 @@ MainWindow::MainWindow(QWidget* parent)
     , m_resultPage(nullptr)
     , m_leaderboardPage(nullptr)
     , m_chartEditorPage(nullptr)
+    , m_themeEditorPage(nullptr)
     , m_loadWatcher(new QFutureWatcher<void>(this))
     , m_loadSuccess(false)
     , m_analyzedBpm(0.0f)
+    , m_pendingLowFreqRatio(0.0f)
+    , m_pendingAvgEnergy(0.0f)
     , m_analysisTimer(new QTimer(this))
     , m_analysisActive(false)
     , m_gameLaneCount(6)
 {
     setupUI();
     connectSignals();
+
+    // 清理缓存中已不存在的歌曲的排行榜孤儿数据
+    {
+        QSet<qint64> cachedSizes;
+        for (const CacheEntry& e : m_cacheManager->allEntries())
+            cachedSizes.insert(e.fileSize);
+
+        QVector<LeaderboardEntry> allLb = m_leaderboardManager->allEntries();
+        for (const LeaderboardEntry& le : allLb) {
+            if (!cachedSizes.contains(le.songFileSize)) {
+                m_leaderboardManager->clearSong(le.songFileSize, le.laneCount, false);
+                m_leaderboardManager->clearSong(le.songFileSize, le.laneCount, true);
+            }
+        }
+    }
+
     navigateTo(0); // 启动时显示主菜单
 
     // 超时定时器：单次触发 90 秒
@@ -215,8 +253,9 @@ void MainWindow::setupUI()
     m_resultPage = new ResultWidget(this);
     m_leaderboardPage = new LeaderboardWidget(m_leaderboardManager, this);
     m_chartEditorPage = new ChartEditorWidget(m_audioEngine, m_chartManager, this);
+    m_themeEditorPage = new ThemeEditorWidget(this);
 
-    // 添加到 QStackedWidget（按顺序：0-6）
+    // 添加到 QStackedWidget（按顺序：0-7）
     m_stack->addWidget(m_mainMenuPage);      // 索引 0：主菜单
     m_stack->addWidget(m_songSelectPage);    // 索引 1：歌曲选择
     m_stack->addWidget(m_visPage);           // 索引 2：可视化
@@ -224,6 +263,7 @@ void MainWindow::setupUI()
     m_stack->addWidget(m_resultPage);        // 索引 4：结算
     m_stack->addWidget(m_leaderboardPage);   // 索引 5：排行榜
     m_stack->addWidget(m_chartEditorPage);   // 索引 6：谱面编辑
+    m_stack->addWidget(m_themeEditorPage);   // 索引 7：主题编辑
 
     setCentralWidget(m_stack);
 }
@@ -237,6 +277,8 @@ void MainWindow::connectSignals()
             this, &MainWindow::onLeaderboardRequested);
     connect(m_mainMenuPage, &MainMenuWidget::exitRequested,
             QApplication::instance(), &QApplication::quit);
+    connect(m_mainMenuPage, &MainMenuWidget::themeEditRequested,
+            this, &MainWindow::onThemeEditRequested);
 
     // 排行榜页 → 返回主菜单
     connect(m_leaderboardPage, &LeaderboardWidget::backRequested,
@@ -270,6 +312,10 @@ void MainWindow::connectSignals()
     connect(m_chartEditorPage, &ChartEditorWidget::backRequested,
             this, [this]() { m_audioEngine->pause(); navigateTo(1); });
 
+    // 主题编辑器 → 返回主菜单
+    connect(m_themeEditorPage, &ThemeEditorWidget::backRequested,
+            this, [this]() { navigateTo(0); });
+
     // 可视化页 → 返回
     connect(m_visPage, &VisualizationWidget::backRequested,
             this, [this]() {
@@ -281,6 +327,8 @@ void MainWindow::connectSignals()
     // 游戏页 → 结算
     connect(m_gamePage, &GameWidget::gameFinished,
             this, &MainWindow::onGameFinished);
+    connect(m_gamePage, &GameWidget::gameOver,
+            this, &MainWindow::onSurvivalGameOver);
     connect(m_gamePage, &GameWidget::backRequested,
             this, [this]() { navigateTo(0); });
 
@@ -392,6 +440,9 @@ void MainWindow::onAnalyzeRequested(const QString& path)
         normalizeNoteDensity(m_pendingNotes, engine->duration());
         mergeHolds(m_pendingNotes);  // 分析阶段即生成 HOLD 音符
         m_analyzedBpm = detector->bpm();
+        auto af = detector->audioFeatures();
+        m_pendingLowFreqRatio = af.lowFreqRatio;
+        m_pendingAvgEnergy = af.avgEnergy;
         m_loadSuccess = true;
 
         if (detector->beatPoints().isEmpty()) {
@@ -417,6 +468,14 @@ void MainWindow::onAnalyzeFinished()
     if (m_loadSuccess) {
         // 成功：将后台生成的音符移到主线程
         m_currentNotes = std::move(m_pendingNotes);
+
+        // 根据音频特征自动切换游戏内主题（仅当开关开启且用户未手动选主题时）
+        if (ThemeManager::instance()->autoMoodEnabled()
+            && !ThemeManager::instance()->manualGameOverride()) {
+            Mood mood = classifyMood(m_analyzedBpm, m_pendingLowFreqRatio, m_pendingAvgEnergy);
+            ThemeManager::instance()->applyGameTheme(mood);
+        }
+
         m_songSelectPage->onAnalysisComplete(m_analyzedBpm);
 
         // 保存到缓存
@@ -486,7 +545,8 @@ void MainWindow::onGameRequested()
     }
 
     navigateTo(3);
-    m_gamePage->startGame(m_gameNotes, m_gameLaneCount);
+    m_survivalMode = m_songSelectPage->isSurvivalMode();
+    m_gamePage->startGame(m_gameNotes, m_gameLaneCount, m_survivalMode);
 }
 
 void MainWindow::onGameFinished()
@@ -500,7 +560,25 @@ void MainWindow::onGameFinished()
         m_scoreManager->maxCombo(),
         totalNotes
     );
+    if (m_survivalMode)
+        m_resultPage->setSurvivalResult(true);
     // 预填上次使用的玩家名，供玩家确认后记入排行榜
+    m_resultPage->presetName(m_leaderboardManager->myName());
+    navigateTo(4);
+}
+
+void MainWindow::onSurvivalGameOver()
+{
+    int totalNotes = m_gameNotes.size();
+    m_resultPage->setResult(
+        m_scoreManager->score(),
+        m_scoreManager->perfectCount(),
+        m_scoreManager->goodCount(),
+        m_scoreManager->missCount(),
+        m_scoreManager->maxCombo(),
+        totalNotes
+    );
+    m_resultPage->setSurvivalResult(false);
     m_resultPage->presetName(m_leaderboardManager->myName());
     navigateTo(4);
 }
@@ -513,7 +591,7 @@ void MainWindow::onRetryRequested()
         return;
     }
     navigateTo(3);
-    m_gamePage->startGame(m_gameNotes, m_gameLaneCount);
+    m_gamePage->startGame(m_gameNotes, m_gameLaneCount, m_survivalMode);
 }
 
 void MainWindow::onBackToMenuRequested()
@@ -541,6 +619,7 @@ void MainWindow::onScoreSubmitted(const QString& playerName)
     entry.songDurationMs = m_audioEngine->duration();
     entry.bpm            = m_analyzedBpm;
     entry.laneCount      = m_gameLaneCount;
+    entry.survival       = m_survivalMode;
     entry.playerName     = playerName;
     entry.score          = m_scoreManager->score();
     entry.perfect        = m_scoreManager->perfectCount();
@@ -552,7 +631,7 @@ void MainWindow::onScoreSubmitted(const QString& playerName)
     entry.playedAt       = QDateTime::currentDateTime();
 
     int rank = m_leaderboardManager->addEntry(entry);
-    int total = m_leaderboardManager->entriesForSong(entry.songFileSize, entry.laneCount).size();
+    int total = m_leaderboardManager->entriesForSong(entry.songFileSize, entry.laneCount, m_survivalMode).size();
     m_resultPage->showRank(rank, total);
 }
 
@@ -581,35 +660,72 @@ void MainWindow::onHistorySelected(const QString& filePath)
 
     // ── 显示加载中状态 ──
     m_songSelectPage->showLoadingState();
-    QApplication::processEvents();  // 立即刷新 UI
-
-    // 加载音频文件（播放用）
     m_currentSongPath = filePath;
-    bool loadOk = m_audioEngine->loadFile(filePath);
-    if (!loadOk) {
+
+    // 缓存entry数据（指针在异步回调时可能失效）
+    float cachedBpm = entry->bpm;
+    qint64 cachedDurationMs = entry->durationMs;
+    QVector<QPair<qint64,int>> cachedNotes = entry->notes;
+    float cachedLowFreqRatio = entry->lowFreqRatio;
+    float cachedAvgEnergy = entry->avgEnergy;
+
+    // 异步加载音频文件，不阻塞主线程（spinner可正常转圈）
+    AudioEngine* engine = m_audioEngine;
+    auto* watcher = new QFutureWatcher<bool>(this);
+    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, watcher, filePath,
+            cachedBpm, cachedDurationMs, cachedNotes, cachedLowFreqRatio, cachedAvgEnergy]() {
+        watcher->deleteLater();
+        bool loadOk = watcher->result();
+        if (!loadOk) {
+            m_songSelectPage->hideLoadingState();
+            m_songSelectPage->showAnalysisError(
+                QStringLiteral("无法加载音频文件，请检查文件是否损坏"));
+            return;
+        }
+
+        // 从缓存恢复音符数据
+        m_currentNotes.clear();
+        m_currentNotes.reserve(cachedNotes.size());
+        for (const auto& pair : cachedNotes) {
+            m_currentNotes.append(GameNote(pair.first, pair.second));
+        }
+        m_analyzedBpm = cachedBpm;
+        m_pendingLowFreqRatio = cachedLowFreqRatio;
+        m_pendingAvgEnergy = cachedAvgEnergy;
+        mergeHolds(m_currentNotes);
+
+        // 从缓存恢复时也应用对应游戏内主题（用户手动选主题时跳过）
+        if (ThemeManager::instance()->autoMoodEnabled()
+            && !ThemeManager::instance()->manualGameOverride()) {
+            Mood mood = classifyMood(cachedBpm, cachedLowFreqRatio, cachedAvgEnergy);
+            ThemeManager::instance()->applyGameTheme(mood);
+        }
+
+        // 更新 UI 为已分析状态
+        m_songSelectPage->loadFromCache(filePath, m_analyzedBpm, cachedDurationMs, cachedNotes);
         m_songSelectPage->hideLoadingState();
-        m_songSelectPage->showAnalysisError(
-            QStringLiteral("无法加载音频文件，请检查文件是否损坏"));
-        return;
-    }
+    });
 
-    // 从缓存恢复音符数据
-    m_currentNotes.clear();
-    m_currentNotes.reserve(entry->notes.size());
-    for (const auto& pair : entry->notes) {
-        m_currentNotes.append(GameNote(pair.first, pair.second));
-    }
-    m_analyzedBpm = entry->bpm;
-    mergeHolds(m_currentNotes);  // 缓存只存 TAP，需重新生成 HOLD
-
-    // 更新 UI 为已分析状态
-    m_songSelectPage->loadFromCache(filePath, m_analyzedBpm, entry->durationMs);
-    m_songSelectPage->hideLoadingState();
+    auto future = QtConcurrent::run([engine, filePath]() -> bool {
+        return engine->loadFile(filePath);
+    });
+    watcher->setFuture(future);
 }
 
 void MainWindow::onHistoryDeleteRequested(const QString& filePath)
 {
     m_cacheManager->remove(filePath);
+
+    // 同步删除排行榜数据（4K + 6K）
+    QFileInfo fi(filePath);
+    qint64 fileSize = fi.size();
+    if (fileSize > 0) {
+        m_leaderboardManager->clearSong(fileSize, 4, false);
+        m_leaderboardManager->clearSong(fileSize, 6, false);
+        m_leaderboardManager->clearSong(fileSize, 4, true);
+        m_leaderboardManager->clearSong(fileSize, 6, true);
+    }
+
     refreshHistory();
 }
 
@@ -624,6 +740,8 @@ void MainWindow::saveToCache()
     entry.fileSize = fi.size();
     entry.durationMs = m_audioEngine->duration();
     entry.bpm = m_analyzedBpm;
+    entry.lowFreqRatio = m_pendingLowFreqRatio;
+    entry.avgEnergy = m_pendingAvgEnergy;
     entry.analyzedAt = QDateTime::currentDateTime();
 
     entry.notes.reserve(m_currentNotes.size());
@@ -677,4 +795,9 @@ void MainWindow::onChartPlayRequested(const QVector<GameNote>& notes)
     m_audioEngine->pause();
     navigateTo(1);
     onGameRequested();
+}
+
+void MainWindow::onThemeEditRequested()
+{
+    navigateTo(7);
 }

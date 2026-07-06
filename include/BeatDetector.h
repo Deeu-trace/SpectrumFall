@@ -3,6 +3,14 @@
 #include <QObject>
 #include <QVector>
 
+/// 音频特征（用于情绪分类）
+struct AudioFeatures
+{
+    float bpm;           ///< 检测到的 BPM
+    float lowFreqRatio;  ///< 低频能量占比 (0-1)
+    float avgEnergy;     ///< 平均能量 (归一化 0-1)
+};
+
 /// 节拍点数据结构
 struct BeatPoint
 {
@@ -34,6 +42,9 @@ public:
     /// 获取所有节拍点（含轨道分配）
     const QVector<BeatPoint>& beatPoints() const;
 
+    /// 获取音频特征（用于情绪分类）
+    AudioFeatures audioFeatures() const;
+
 signals:
     void progressChanged(int percent);
 
@@ -44,6 +55,10 @@ private:
     int m_hopSize;
     volatile bool m_cancelled;
     int m_laneCount;          ///< 当前轨道数（4 或 6）
+
+    // 音频特征（analyze 末尾计算）
+    float m_lowFreqRatio = 0;
+    float m_avgEnergy = 0;
 
     static constexpr int MAX_LANES = 6;
 

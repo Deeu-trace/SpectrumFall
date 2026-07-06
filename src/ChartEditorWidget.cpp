@@ -27,6 +27,7 @@
 #include <QModelIndexList>
 #include <QDebug>
 #include <algorithm>
+#include <QIcon>
 
 // ── SpinBoxDelegate：限制表格编辑只能输入指定范围内的整数 ──
 // 非 Q_OBJECT 类，仅重写虚函数，不需要 MOC 注册
@@ -255,11 +256,15 @@ void ChartEditorWidget::setupUI()
     m_saveBtn = new QPushButton(QStringLiteral("保存谱面"), this);
     m_saveBtn->setMinimumSize(100, 34);
     m_saveBtn->setObjectName("actionButton");
+    m_saveBtn->setIcon(QIcon(":/icons/pencil.svg"));
+    m_saveBtn->setIconSize(QSize(20, 20));
     btnRow->addWidget(m_saveBtn);
 
     m_playGameBtn = new QPushButton(QStringLiteral("开始游戏"), this);
     m_playGameBtn->setMinimumSize(100, 34);
     m_playGameBtn->setObjectName("actionButton");
+    m_playGameBtn->setIcon(QIcon(":/icons/gamepad.svg"));
+    m_playGameBtn->setIconSize(QSize(20, 20));
     btnRow->addWidget(m_playGameBtn);
 
     btnRow->addStretch();
@@ -275,6 +280,8 @@ void ChartEditorWidget::setupUI()
     m_backBtn = new QPushButton(QStringLiteral("返回"), this);
     m_backBtn->setMinimumSize(80, 34);
     m_backBtn->setObjectName("backButton");
+    m_backBtn->setIcon(QIcon(":/icons/arrow-left.svg"));
+    m_backBtn->setIconSize(QSize(20, 20));
     btnRow->addWidget(m_backBtn);
 
     layout->addLayout(btnRow);
@@ -340,12 +347,11 @@ void ChartEditorWidget::loadChart(const QVector<GameNote>& notes, const QString&
     populateTable(notes);
     m_loading = false;
 
-    updateInfoLabel();
     m_posLabel->setText(formatTime(0) + QStringLiteral(" / ") + formatTime(durationMs));
 
-    // 同步时间轴
+    // 同步时间轴并显示 TAP/HOLD 统计
     m_timeline->setDurationMs(durationMs);
-    m_timeline->setNotes(notes);
+    syncTimeline();
 }
 
 void ChartEditorWidget::populateTable(const QVector<GameNote>& notes)

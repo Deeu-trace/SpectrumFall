@@ -52,7 +52,8 @@ public:
 
     /// 开始游戏（传入音符列表）
     /// @param laneCount 轨道数（4 或 6）
-    void startGame(const QVector<GameNote>& notes, int laneCount = 6);
+    /// @param survival 是否为生存模式
+    void startGame(const QVector<GameNote>& notes, int laneCount = 6, bool survival = false);
 
     /// 暂停游戏
     void pauseGame();
@@ -62,6 +63,7 @@ public:
 
 signals:
     void gameFinished();
+    void gameOver();
     void backRequested();
     void restartRequested();  ///< 请求 MainWindow 重新开始当前歌曲
 
@@ -76,9 +78,6 @@ private slots:
 
 private:
     void setupPauseOverlay();          ///< 创建暂停菜单遮罩
-
-    /// 测试用：跳转到歌曲结束前 10 秒（静默跳过之前的音符，不计 Miss）
-    void skipToEndTest();
 
     /// 将同轨道间距相近的 Tap 音符合并为 Hold 音符
     void mergeHolds();
@@ -131,7 +130,6 @@ private:
     QWidget* m_pauseOverlay;           ///< 暂停遮罩
     QPushButton* m_continueBtn;        ///< 继续游戏按钮
     QPushButton* m_backToMenuBtn;      ///< 返回主菜单按钮
-    QPushButton* m_testSkipBtn;        ///< 测试按钮：跳到结尾前10秒
 
     /// 获取精确的当前游戏时间（毫秒），基于高精度时钟
     qint64 getGameTime() const;
@@ -168,4 +166,21 @@ private:
 
     QPixmap m_bgCache;                ///< 缓存的背景（星空+渐变）
     QSize m_bgCacheSize;              ///< 缓存背景的尺寸（用于判断是否需要重建）
+
+    // ── 生存模式 ──
+    bool m_survivalMode = false;       ///< 是否为生存模式
+    int m_hp = 100;                    ///< 当前血量（0-100）
+    int m_maxHp = 100;                 ///< 最大血量
+    qreal m_displayHp = 100.0;         ///< 显示用血量（平滑插值）
+    int m_hpFlashTimer = 0;            ///< 受击闪红计时器（帧数）
+    int m_prevPerfect = 0;             ///< 上一帧 Perfect 计数（用于 delta 计算）
+    int m_prevGood = 0;                ///< 上一帧 Good 计数
+    int m_prevMiss = 0;                ///< 上一帧 Miss 计数
+    int m_lastHpCombo = 0;             ///< 上次触发回血的连击里程碑（连击回血机制）
+
+    /// 绘制生存模式血条（左上角）
+    void drawHealthBar(QPainter& p);
+
+    /// 应用血量变化（Miss 扣血 / Perfect-Good 回血）
+    void applyHpChange(int delta);
 };

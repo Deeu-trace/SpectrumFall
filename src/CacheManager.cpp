@@ -106,6 +106,8 @@ void CacheManager::loadFromDisk()
         entry.fileSize   = static_cast<qint64>(obj.value(QStringLiteral("fileSize")).toDouble(0));
         entry.durationMs = static_cast<qint64>(obj.value(QStringLiteral("durationMs")).toDouble(0));
         entry.bpm        = static_cast<float>(obj.value(QStringLiteral("bpm")).toDouble(0));
+        entry.lowFreqRatio = static_cast<float>(obj.value(QStringLiteral("lowFreqRatio")).toDouble(0));
+        entry.avgEnergy   = static_cast<float>(obj.value(QStringLiteral("avgEnergy")).toDouble(0));
         entry.analyzedAt = QDateTime::fromString(
             obj.value(QStringLiteral("analyzedAt")).toString(), Qt::ISODate);
 
@@ -146,6 +148,8 @@ void CacheManager::saveToDisk()
         obj[QStringLiteral("fileSize")]   = static_cast<double>(entry.fileSize);
         obj[QStringLiteral("durationMs")] = static_cast<double>(entry.durationMs);
         obj[QStringLiteral("bpm")]        = static_cast<double>(entry.bpm);
+        obj[QStringLiteral("lowFreqRatio")] = static_cast<double>(entry.lowFreqRatio);
+        obj[QStringLiteral("avgEnergy")]   = static_cast<double>(entry.avgEnergy);
         obj[QStringLiteral("analyzedAt")] = entry.analyzedAt.toString(Qt::ISODate);
 
         QJsonArray notesArr;

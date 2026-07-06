@@ -1,4 +1,5 @@
 #include "WaterfallVisualizer.h"
+#include "ThemeManager.h"
 #include <QPainter>
 #include <QPaintEvent>
 #include <cmath>
@@ -26,25 +27,45 @@ void WaterfallVisualizer::setSpectrumData(const QVector<float>& magnitude)
 
 QColor WaterfallVisualizer::energyToColor(float value) const
 {
-    // 颜色映射：深蓝 → 青 → 绿 → 黄 → 红
+    // 颜色映射：暗底 → primary → secondary → 亮白
     value = qBound(0.0f, value, 1.0f);
 
+    ThemePalette p = ThemeManager::instance()->gamePalette();
+    QColor c1(p.primary);
+    QColor c2(p.secondary);
+    QColor bg(p.visBgDeep);
+
     if (value < 0.25f) {
-        // 深蓝到青
+        // 背景色 → primary (淡入)
         float t = value / 0.25f;
-        return QColor(0, 0, static_cast<int>(80 + 175 * t), 255);
+        return QColor(
+            static_cast<int>(bg.red()   + (c1.red()   - bg.red())   * t),
+            static_cast<int>(bg.green() + (c1.green() - bg.green()) * t),
+            static_cast<int>(bg.blue()  + (c1.blue()  - bg.blue())  * t),
+            static_cast<int>(40 + 215 * t)
+        );
     } else if (value < 0.5f) {
-        // 青到绿
+        // primary 全亮
         float t = (value - 0.25f) / 0.25f;
-        return QColor(0, static_cast<int>(255 * t), static_cast<int>(255 * (1.0f - t)), 255);
+        return QColor(c1.red(), c1.green(), c1.blue(), static_cast<int>(255));
     } else if (value < 0.75f) {
-        // 绿到黄
+        // primary → secondary
         float t = (value - 0.5f) / 0.25f;
-        return QColor(static_cast<int>(255 * t), 255, 0, 255);
+        return QColor(
+            static_cast<int>(c1.red()   + (c2.red()   - c1.red())   * t),
+            static_cast<int>(c1.green() + (c2.green() - c1.green()) * t),
+            static_cast<int>(c1.blue()  + (c2.blue()  - c1.blue())  * t),
+            255
+        );
     } else {
-        // 黄到红
+        // secondary → 亮白
         float t = (value - 0.75f) / 0.25f;
-        return QColor(255, static_cast<int>(255 * (1.0f - t)), 0, 255);
+        return QColor(
+            static_cast<int>(c2.red()   + (255 - c2.red())   * t),
+            static_cast<int>(c2.green() + (255 - c2.green()) * t),
+            static_cast<int>(c2.blue()  + (255 - c2.blue())  * t),
+            255
+        );
     }
 }
 
@@ -56,7 +77,8 @@ void WaterfallVisualizer::paintEvent(QPaintEvent* event)
     painter.setRenderHint(QPainter::Antialiasing, false);
 
     // 背景
-    painter.fillRect(rect(), QColor(10, 10, 30));
+    ThemePalette p = ThemeManager::instance()->gamePalette();
+    painter.fillRect(rect(), QColor(p.visBgDeep));
 
     if (m_history.isEmpty()) {
         return;

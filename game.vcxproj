@@ -37,12 +37,12 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="QtSettings">
     <QtInstall>6.11.1_msvc2022_64</QtInstall>
-    <QtModules>core;gui;widgets;multimedia;multimediawidgets;concurrent;opengl;openglwidgets</QtModules>
+    <QtModules>core;gui;widgets;multimedia;multimediawidgets;concurrent;opengl;openglwidgets;svg</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="QtSettings">
     <QtInstall>6.11.1_msvc2022_64</QtInstall>
-    <QtModules>core;gui;widgets;multimedia;multimediawidgets;concurrent;opengl;openglwidgets</QtModules>
+    <QtModules>core;gui;widgets;multimedia;multimediawidgets;concurrent;opengl;openglwidgets;svg</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
@@ -121,6 +121,8 @@
     <QtMoc Include="include\ChartManager.h" />
     <QtMoc Include="include\ChartEditorWidget.h" />
     <QtMoc Include="include\ChartTimelineWidget.h" />
+    <QtMoc Include="include\ThemeManager.h" />
+    <QtMoc Include="include\ThemeEditorWidget.h" />
     <ClInclude Include="include\UIButtonEffects.h" />
   </ItemGroup>
   <ItemGroup>
@@ -150,6 +152,8 @@
     <ClCompile Include="src\ChartManager.cpp" />
     <ClCompile Include="src\ChartEditorWidget.cpp" />
     <ClCompile Include="src\ChartTimelineWidget.cpp" />
+    <ClCompile Include="src\ThemeManager.cpp" />
+    <ClCompile Include="src\ThemeEditorWidget.cpp" />
     <ClCompile Include="src\UIButtonEffects.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

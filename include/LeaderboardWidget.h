@@ -23,6 +23,10 @@ public:
 signals:
     void backRequested();
 
+private slots:
+    void onExportClicked();
+    void onImportClicked();
+
 private:
     LeaderboardManager* m_lb;
 
@@ -31,7 +35,12 @@ private:
     QPushButton* m_filterAllBtn;   ///< 全部 筛选按钮
     QPushButton* m_filter4KBtn;    ///< 4K 筛选按钮
     QPushButton* m_filter6KBtn;    ///< 6K 筛选按钮
+    QPushButton* m_filterNormalBtn; ///< 普通模式 筛选按钮
+    QPushButton* m_filterSurvivalBtn; ///< 生存模式 筛选按钮
+    QPushButton* m_exportBtn;      ///< 导出按钮
+    QPushButton* m_importBtn;      ///< 导入按钮
     int m_currentFilter;           ///< 当前筛选: 0=全部, 4=4K, 6=6K
+    bool m_showSurvival;           ///< 是否显示生存模式排行
 
     QMap<qint64, QVector<LeaderboardEntry>> m_groupedEntries;
 

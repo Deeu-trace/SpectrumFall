@@ -18,14 +18,17 @@
 #include <QApplication>
 #include <QSplitter>
 #include <QFrame>
+#include <QSoundEffect>
+#include <QUrl>
+#include <QIcon>
 #include <cmath>
 
 // -- SpinnerWidget (no Q_OBJECT, internal to SongSelectWidget) --
 class SpinnerWidget : public QWidget
 {
 public:
-    explicit SpinnerWidget(QWidget* parent = nullptr)
-        : QWidget(parent), m_angle(0)
+    explicit SpinnerWidget(QWidget* parent = nullptr, QColor arcColor = QColor(103, 232, 249))
+        : QWidget(parent), m_angle(0), m_arcColor(arcColor)
     {
         setFixedSize(28, 28);
         m_timer.setInterval(40);
@@ -49,7 +52,7 @@ protected:
         float cy = height() / 2.0f;
         float r  = qMin(cx, cy) - 3.0f;
 
-        QPen pen(QColor(0, 255, 136), 2.5f);
+        QPen pen(m_arcColor, 2.5f);
         pen.setCapStyle(Qt::RoundCap);
         p.setPen(pen);
         p.setBrush(Qt::NoBrush);
@@ -59,6 +62,7 @@ protected:
 
 private:
     int m_angle;
+    QColor m_arcColor;
     QTimer m_timer;
 };
 
@@ -72,10 +76,14 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     : QWidget(parent)
     , m_analysisDone(false)
     , m_spinner(nullptr)
+    , m_loadingSpinner(nullptr)
     , m_leaderboardMgr(nullptr)
     , m_laneCount(6)
-    , m_spinnerDialog(nullptr)
 {
+    // 点击音效
+    m_clickSound = new QSoundEffect(this);
+    m_clickSound->setSource(QUrl(QStringLiteral("qrc:/game/click.wav")));
+    m_clickSound->setVolume(0.5f);
     // -- Splitter: left | right --
     m_splitter = new QSplitter(Qt::Horizontal, this);
     m_splitter->setHandleWidth(2);
@@ -117,9 +125,12 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
             this, &SongSelectWidget::onHistoryContextMenu);
 
     // -- Select file button (at bottom) --
-    m_selectFileBtn = new QPushButton(QString::fromUtf8("\xe9\x80\x89\xe6\x8b\xa9\xe6\x9c\xac\xe5\x9c\xb0\xe6\xad\x8c\xe6\x9b\xb2"), m_leftPanel);
+    m_selectFileBtn = new QPushButton(QString::fromUtf8("\xc2\xa0\xe9\x80\x89\xe6\x8b\xa9\xe6\x9c\xac\xe5\x9c\xb0\xe6\xad\x8c\xe6\x9b\xb2"), m_leftPanel);
     m_selectFileBtn->setObjectName("menuButton");
     m_selectFileBtn->setFixedHeight(45);
+    m_selectFileBtn->setIcon(QIcon(":/icons/folder-music.svg"));
+    m_selectFileBtn->setIconSize(QSize(20, 20));
+    m_selectFileBtn->setProperty("iconPad", true);
     leftLayout->addWidget(m_selectFileBtn);
 
     m_splitter->addWidget(m_leftPanel);
@@ -133,14 +144,36 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     rightLayout->setContentsMargins(10, 20, 20, 20);
     rightLayout->setSpacing(12);
 
+    rightLayout->addStretch(1);
+
     // Placeholder (visible when no file selected)
     m_placeholderLabel = new QLabel(
-        QString::fromUtf8("\xe8\xaf\xb7\xe4\xbb\x8e\xe5\xb7\xa6\xe4\xbe\xa7\xe9\x80\x89\xe6\x8b\xa9\xe6\xad\x8c\xe6\x9b\xb2"),
+        QString::fromUtf8("\xe8\xaf\xb7\xe5\x9c\xa8\xe5\xb7\xa6\xe4\xbe\xa7\xe9\x80\x89\xe6\x8b\xa9\xe6\xad\x8c\xe6\x9b\xb2"),
         m_rightPanel);
     m_placeholderLabel->setAlignment(Qt::AlignCenter);
     m_placeholderLabel->setStyleSheet(
-        "color: #666666; font-size: 20px; background: transparent;");
+        "color: #555555; font-size: 15px; background: transparent;");
     rightLayout->addWidget(m_placeholderLabel);
+
+    // -- Loading widget (shown during cache loading) --
+    m_loadingWidget = new QWidget(m_rightPanel);
+    QVBoxLayout* loadingLayout = new QVBoxLayout(m_loadingWidget);
+    loadingLayout->setAlignment(Qt::AlignCenter);
+    loadingLayout->setSpacing(10);
+
+    SpinnerWidget* loadSpinner = new SpinnerWidget(m_loadingWidget);
+    loadingLayout->addWidget(loadSpinner, 0, Qt::AlignCenter);
+    m_loadingSpinner = loadSpinner;
+
+    QLabel* loadLabel = new QLabel(
+        QString::fromUtf8("\xe5\x8a\xa0\xe8\xbd\xbd\xe4\xb8\xad..."), m_loadingWidget);
+    loadLabel->setAlignment(Qt::AlignCenter);
+    loadLabel->setStyleSheet(
+        "color: #67e8f9; font-size: 15px; font-weight: bold; background: transparent;");
+    loadingLayout->addWidget(loadLabel);
+
+    m_loadingWidget->hide();
+    rightLayout->addWidget(m_loadingWidget);
 
     // -- Cards container --
     m_cardsContainer = new QWidget(m_rightPanel);
@@ -160,9 +193,19 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     infoLayout->setSpacing(6);
     infoLayout->setContentsMargins(28, 22, 28, 22);
 
+    m_fileIconLabel = new QLabel(m_infoCard);
+    m_fileIconLabel->setPixmap(QIcon(":/icons/music-note.svg").pixmap(22, 22));
+    m_fileIconLabel->setStyleSheet("background: transparent; padding-top: 2px;");
+    m_fileIconLabel->setAlignment(Qt::AlignVCenter);
+    QHBoxLayout* nameRow = new QHBoxLayout();
+    nameRow->setSpacing(10);
+    nameRow->setContentsMargins(0, 0, 0, 0);
+    nameRow->addWidget(m_fileIconLabel);
     m_fileNameLabel = new QLabel(m_infoCard);
     m_fileNameLabel->setStyleSheet("color: #e0e0e0; font-size: 20px; font-weight: bold; background: transparent;");
-    infoLayout->addWidget(m_fileNameLabel);
+    nameRow->addWidget(m_fileNameLabel);
+    nameRow->addStretch();
+    infoLayout->addLayout(nameRow);
 
     m_fileSizeLabel = new QLabel(m_infoCard);
     m_fileSizeLabel->setStyleSheet("color: #aaaaaa; font-size: 14px; background: transparent;");
@@ -176,24 +219,43 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     m_bpmLabel->setStyleSheet("color: #bd93f9; font-size: 18px; font-weight: bold; background: transparent;");
     infoLayout->addWidget(m_bpmLabel);
 
+    m_difficultyLabel = new QLabel(m_infoCard);
+    m_difficultyLabel->setStyleSheet("color: #ffd700; font-size: 15px; background: transparent;");
+    infoLayout->addWidget(m_difficultyLabel);
+
     infoLayout->addSpacing(8);
 
     // Analyze button row
     QHBoxLayout* analyzeRow = new QHBoxLayout();
     analyzeRow->setAlignment(Qt::AlignLeft);
 
-    SpinnerWidget* spinner = new SpinnerWidget(m_infoCard);
+    SpinnerWidget* spinner = new SpinnerWidget(m_infoCard, QColor(0, 255, 136));
     spinner->setObjectName("analysisSpinner");
     spinner->hide();
     m_spinner = spinner;
     analyzeRow->addWidget(spinner);
 
     m_analyzeBtn = new QPushButton(
-        QString::fromUtf8("\xe5\xbc\x80\xe5\xa7\x8b\xe5\x88\x86\xe6\x9e\x90""BPM\xe5\xb9\xb6\xe7\x94\x9f\xe6\x88\x90\xe8\xb0\xb1\xe9\x9d\xa2"),
+        QString::fromUtf8("\xc2\xa0\xe5\xbc\x80\xe5\xa7\x8b\xe5\x88\x86\xe6\x9e\x90""BPM\xe5\xb9\xb6\xe7\x94\x9f\xe6\x88\x90\xe8\xb0\xb1\xe9\x9d\xa2"),
         m_infoCard);
     m_analyzeBtn->setMinimumSize(260, 45);
     m_analyzeBtn->setObjectName("actionButton");
+    m_analyzeBtn->setIcon(QIcon(":/icons/refresh.svg"));
+    m_analyzeBtn->setIconSize(QSize(20, 20));
+    m_analyzeBtn->setProperty("iconPad", true);
     analyzeRow->addWidget(m_analyzeBtn);
+
+    m_deleteBtn = new QPushButton(m_infoCard);
+    m_deleteBtn->setFixedSize(40, 40);
+    m_deleteBtn->setIcon(QIcon(":/icons/trash.svg"));
+    m_deleteBtn->setIconSize(QSize(18, 18));
+    m_deleteBtn->setToolTip(QString::fromUtf8("\xe5\x88\xa0\xe9\x99\xa4\xe6\xad\xa4\xe8\xae\xb0\xe5\xbd\x95"));
+    m_deleteBtn->setStyleSheet(
+        "QPushButton { background: transparent; border: 1px solid #3a3a50; border-radius: 6px; }"
+        "QPushButton:hover { border-color: #e94560; background: rgba(233,69,96,30); }"
+        "QPushButton:pressed { background: rgba(233,69,96,60); }");
+    analyzeRow->addWidget(m_deleteBtn);
+
     analyzeRow->addStretch();
 
     infoLayout->addLayout(analyzeRow);
@@ -230,12 +292,22 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     scoreLayout->setSpacing(4);
     scoreLayout->setContentsMargins(28, 18, 28, 18);
 
+    m_scoreIconLabel = new QLabel(m_scoreCard);
+    m_scoreIconLabel->setPixmap(QIcon(":/icons/trophy.svg").pixmap(20, 20));
+    m_scoreIconLabel->setStyleSheet("background: transparent; padding-top: 2px;");
+    m_scoreIconLabel->setAlignment(Qt::AlignVCenter);
+    QHBoxLayout* scoreTitleRow = new QHBoxLayout();
+    scoreTitleRow->setSpacing(8);
+    scoreTitleRow->setContentsMargins(0, 0, 0, 0);
+    scoreTitleRow->addWidget(m_scoreIconLabel);
     m_scoreHistoryTitle = new QLabel(
         QString::fromUtf8("\xe5\x8e\x86\xe5\x8f\xb2\xe6\x88\x90\xe7\xbb\xa9"),
         m_scoreCard);
     m_scoreHistoryTitle->setStyleSheet(
         "color: #bd93f9; font-size: 14px; font-weight: bold; background: transparent;");
-    scoreLayout->addWidget(m_scoreHistoryTitle);
+    scoreTitleRow->addWidget(m_scoreHistoryTitle);
+    scoreTitleRow->addStretch();
+    scoreLayout->addLayout(scoreTitleRow);
 
     m_scoreHist1 = new QLabel(m_scoreCard);
     m_scoreHist1->setStyleSheet("color: #aaaaaa; font-size: 13px; background: transparent;");
@@ -260,14 +332,19 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     m_modeCard->setStyleSheet(QStringLiteral("#modeCard { %1 }").arg(kCardStyle));
 
     QHBoxLayout* modeLayout = new QHBoxLayout(m_modeCard);
-    modeLayout->setSpacing(8);
+    modeLayout->setSpacing(10);
     modeLayout->setContentsMargins(28, 16, 28, 16);
 
+    m_modeIconLabel = new QLabel(m_modeCard);
+    m_modeIconLabel->setPixmap(QIcon(":/icons/gamepad.svg").pixmap(20, 20));
+    m_modeIconLabel->setStyleSheet("background: transparent; padding-top: 2px;");
+    m_modeIconLabel->setAlignment(Qt::AlignVCenter);
     QLabel* modeLabel = new QLabel(
         QString::fromUtf8("\xe6\xb8\xb8\xe6\x88\x8f\xe6\xa8\xa1\xe5\xbc\x8f"),
         m_modeCard);
     modeLabel->setStyleSheet(
         "color: #e0e0e0; font-size: 15px; font-weight: bold; background: transparent;");
+    modeLayout->addWidget(m_modeIconLabel);
     modeLayout->addWidget(modeLabel);
 
     modeLayout->addSpacing(12);
@@ -282,6 +359,22 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     m_6kBtn->setObjectName("modeBtn6K");
     modeLayout->addWidget(m_6kBtn);
 
+    // 生存模式按钮
+    modeLayout->addSpacing(8);
+    auto* divider = new QFrame(m_modeCard);
+    divider->setFrameShape(QFrame::VLine);
+    divider->setStyleSheet("color: #333333;");
+    divider->setFixedHeight(24);
+    modeLayout->addWidget(divider);
+    modeLayout->addSpacing(8);
+
+    m_survivalBtn = new QPushButton(
+        QString::fromUtf8("\xe7\x94\x9f\xe5\xad\x98"), m_modeCard);
+    m_survivalBtn->setMinimumSize(70, 34);
+    m_survivalBtn->setObjectName("modeBtnSurvival");
+    m_survivalBtn->setCheckable(true);
+    modeLayout->addWidget(m_survivalBtn);
+
     modeLayout->addStretch();
 
     cardsLayout->addWidget(m_modeCard);
@@ -294,29 +387,41 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     QHBoxLayout* btnLayout = new QHBoxLayout();
     btnLayout->setSpacing(15);
 
-    m_visualizeBtn = new QPushButton(QString::fromUtf8("\xe5\x8f\xaf\xe8\xa7\x86\xe5\x8c\x96\xe6\xa8\xa1\xe5\xbc\x8f"), m_rightPanel);
+    m_visualizeBtn = new QPushButton(QString::fromUtf8("\xc2\xa0\xe5\x8f\xaf\xe8\xa7\x86\xe5\x8c\x96\xe6\xa8\xa1\xe5\xbc\x8f"), m_rightPanel);
     m_visualizeBtn->setMinimumSize(150, 40);
     m_visualizeBtn->setEnabled(false);
     m_visualizeBtn->setObjectName("actionButton");
+    m_visualizeBtn->setIcon(QIcon(":/icons/eye.svg"));
+    m_visualizeBtn->setIconSize(QSize(20, 20));
+    m_visualizeBtn->setProperty("iconPad", true);
     btnLayout->addWidget(m_visualizeBtn);
 
-    m_chartEditBtn = new QPushButton(QString::fromUtf8("\xe7\xbc\x96\xe8\xbe\x91\xe8\xb0\xb1\xe9\x9d\xa2"), m_rightPanel);
+    m_chartEditBtn = new QPushButton(QString::fromUtf8("\xc2\xa0\xe7\xbc\x96\xe8\xbe\x91\xe8\xb0\xb1\xe9\x9d\xa2"), m_rightPanel);
     m_chartEditBtn->setMinimumSize(150, 40);
     m_chartEditBtn->setEnabled(false);
     m_chartEditBtn->setObjectName("actionButton");
+    m_chartEditBtn->setIcon(QIcon(":/icons/pencil.svg"));
+    m_chartEditBtn->setIconSize(QSize(20, 20));
+    m_chartEditBtn->setProperty("iconPad", true);
     btnLayout->addWidget(m_chartEditBtn);
 
-    m_gameBtn = new QPushButton(QString::fromUtf8("\xe5\xbc\x80\xe5\xa7\x8b\xe6\xb8\xb8\xe6\x88\x8f"), m_rightPanel);
+    m_gameBtn = new QPushButton(QString::fromUtf8("\xc2\xa0\xe5\xbc\x80\xe5\xa7\x8b\xe6\xb8\xb8\xe6\x88\x8f"), m_rightPanel);
     m_gameBtn->setMinimumSize(150, 40);
     m_gameBtn->setEnabled(false);
     m_gameBtn->setObjectName("actionButton");
+    m_gameBtn->setIcon(QIcon(":/icons/play.svg"));
+    m_gameBtn->setIconSize(QSize(20, 20));
+    m_gameBtn->setProperty("iconPad", true);
     btnLayout->addWidget(m_gameBtn);
 
     btnLayout->addStretch();
 
-    m_backBtn = new QPushButton(QString::fromUtf8("\xe8\xbf\x94\xe5\x9b\x9e"), m_rightPanel);
+    m_backBtn = new QPushButton(QString::fromUtf8("\xc2\xa0\xe8\xbf\x94\xe5\x9b\x9e"), m_rightPanel);
     m_backBtn->setMinimumSize(100, 40);
     m_backBtn->setObjectName("backButton");
+    m_backBtn->setIcon(QIcon(":/icons/arrow-left.svg"));
+    m_backBtn->setIconSize(QSize(20, 20));
+    m_backBtn->setProperty("iconPad", true);
     btnLayout->addWidget(m_backBtn);
 
     rightLayout->addLayout(btnLayout);
@@ -333,6 +438,8 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
             this, &SongSelectWidget::onSelectFileClicked);
     connect(m_analyzeBtn, &QPushButton::clicked,
             this, &SongSelectWidget::onAnalyzeClicked);
+    connect(m_deleteBtn, &QPushButton::clicked,
+            this, &SongSelectWidget::onDeleteCurrentClicked);
     connect(m_visualizeBtn, &QPushButton::clicked,
             this, &SongSelectWidget::onVisualizeClicked);
     connect(m_gameBtn, &QPushButton::clicked,
@@ -350,7 +457,14 @@ SongSelectWidget::SongSelectWidget(QWidget* parent)
     connect(m_6kBtn, &QPushButton::clicked,
             this, &SongSelectWidget::onLaneToggled);
 
+    // Survival mode button
+    connect(m_survivalBtn, &QPushButton::toggled, this, [this](bool checked) {
+        m_survivalMode = checked;
+        updateSurvivalButton();
+    });
+
     updateLaneButtons();
+    updateSurvivalButton();
 }
 
 // == Public interface ================================================
@@ -363,6 +477,11 @@ QString SongSelectWidget::selectedSong() const
 int SongSelectWidget::selectedLaneCount() const
 {
     return m_laneCount;
+}
+
+bool SongSelectWidget::isSurvivalMode() const
+{
+    return m_survivalMode;
 }
 
 void SongSelectWidget::setAnalysisProgress(int percent)
@@ -425,6 +544,7 @@ void SongSelectWidget::resetState()
     m_errorLabel->hide();
     m_progressBar->hide();
     m_bpmLabel->setText(QStringLiteral("BPM: --"));
+    m_difficultyLabel->clear();
     m_durationLabel->setText(QString::fromUtf8("\xe6\x97\xb6\xe9\x95\xbf: --"));
     m_fileNameLabel->clear();
     m_fileSizeLabel->clear();
@@ -457,7 +577,13 @@ void SongSelectWidget::refreshHistory(const QVector<CacheEntry>& entries)
     }
 
     for (const CacheEntry& entry : entries) {
-        QString text = QStringLiteral("%1  |  BPM: %2  |  %3  |  %4")
+        int rawStars = calculateDifficulty(entry);
+        int display = qBound(1, (rawStars + 1) / 2, 5);
+        QString stars = QString(display, QChar(0x2605))
+            + QString(5 - display, QChar(0x2606));
+
+        QString text = QStringLiteral("[%1]  %2  |  BPM: %3  |  %4  |  %5")
+            .arg(stars)
             .arg(entry.fileName)
             .arg(static_cast<int>(entry.bpm))
             .arg(formatDuration(entry.durationMs))
@@ -474,7 +600,8 @@ void SongSelectWidget::refreshHistory(const QVector<CacheEntry>& entries)
     }
 }
 
-void SongSelectWidget::loadFromCache(const QString& filePath, float bpm, qint64 durationMs)
+void SongSelectWidget::loadFromCache(const QString& filePath, float bpm, qint64 durationMs,
+                                     const QVector<QPair<qint64, int>>& notes)
 {
     m_selectedPath = filePath;
     m_analysisDone = true;
@@ -488,6 +615,23 @@ void SongSelectWidget::loadFromCache(const QString& filePath, float bpm, qint64 
     m_durationLabel->setText(
         QString::fromUtf8("\xe6\x97\xb6\xe9\x95\xbf: %1").arg(formatDuration(durationMs)));
     m_bpmLabel->setText(QStringLiteral("BPM: %1").arg(static_cast<int>(bpm)));
+
+    // 计算并显示难度星级
+    if (!notes.isEmpty()) {
+        CacheEntry tmp;
+        tmp.notes = notes;
+        tmp.durationMs = durationMs;
+        tmp.bpm = bpm;
+        int rawStars = calculateDifficulty(tmp);
+        int display = qBound(1, (rawStars + 1) / 2, 5);
+        QString stars = QString(display, QChar(0x2605))
+            + QString(5 - display, QChar(0x2606));
+        m_difficultyLabel->setText(
+            QString::fromUtf8("\xe9\x9a\xbe\xe5\xba\xa6: %1").arg(stars));
+    } else {
+        m_difficultyLabel->clear();
+    }
+
     m_errorLabel->hide();
     m_progressBar->hide();
 
@@ -505,40 +649,27 @@ void SongSelectWidget::loadFromCache(const QString& filePath, float bpm, qint64 
 
 void SongSelectWidget::showLoadingState()
 {
-    QDialog* dlg = new QDialog(this);
-    dlg->setWindowTitle(QString::fromUtf8("\xe5\x8a\xa0\xe8\xbd\xbd\xe4\xb8\xad"));
-    dlg->setFixedSize(200, 100);
-    dlg->setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
-    dlg->setStyleSheet(
-        "QDialog { background-color: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; }");
-    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    // 右面板：隐藏占位和卡片，显示加载中
+    m_placeholderLabel->hide();
+    m_cardsContainer->hide();
+    m_loadingWidget->show();
 
-    QVBoxLayout* layout = new QVBoxLayout(dlg);
-    layout->setAlignment(Qt::AlignCenter);
-    layout->setSpacing(8);
+    m_loadingSpinner->start();
 
-    QLabel* label = new QLabel(QString::fromUtf8("\xe5\x8a\xa0\xe8\xbd\xbd\xe4\xb8\xad..."), dlg);
-    label->setAlignment(Qt::AlignCenter);
-    label->setStyleSheet(
-        "color: #00ff88; font-size: 16px; font-weight: bold; background: transparent;");
-    layout->addWidget(label);
-
-    dlg->show();
-    dlg->raise();
-
-    m_spinner = nullptr;
-    m_spinnerDialog = dlg;
-
+    // 熄灭所有按钮
     m_historyList->setEnabled(false);
+    m_selectFileBtn->setEnabled(false);
+    m_analyzeBtn->setEnabled(false);
+    m_visualizeBtn->setEnabled(false);
+    m_chartEditBtn->setEnabled(false);
+    m_gameBtn->setEnabled(false);
     m_backBtn->setEnabled(false);
 }
 
 void SongSelectWidget::hideLoadingState()
 {
-    if (m_spinnerDialog) {
-        m_spinnerDialog->close();
-        m_spinnerDialog = nullptr;
-    }
+    m_loadingSpinner->stop();
+    m_loadingWidget->hide();
 
     m_backBtn->setEnabled(true);
     m_historyList->setEnabled(true);
@@ -611,6 +742,9 @@ void SongSelectWidget::onHistoryItemClicked(QListWidgetItem* item)
     QString filePath = item->data(Qt::UserRole).toString();
     if (filePath.isEmpty()) return;
 
+    if (m_clickSound->isLoaded())
+        m_clickSound->play();
+
     if (!QFileInfo::exists(filePath)) {
         QMessageBox::warning(this,
             QString::fromUtf8("\xe6\x96\x87\xe4\xbb\xb6\xe4\xb8\x8d\xe5\xad\x98\xe5\x9c\xa8"),
@@ -630,6 +764,22 @@ void SongSelectWidget::onHistoryDeleteClicked()
     if (filePath.isEmpty()) return;
 
     emit historyDeleteRequested(filePath);
+}
+
+void SongSelectWidget::onDeleteCurrentClicked()
+{
+    if (m_selectedPath.isEmpty()) return;
+
+    QMessageBox::StandardButton ret = QMessageBox::question(
+        this,
+        QString::fromUtf8("\xe7\xa1\xae\xe8\xae\xa4\xe5\x88\xa0\xe9\x99\xa4"),
+        QString::fromUtf8("\xe7\xa1\xae\xe8\xae\xa4\xe5\x88\xa0\xe9\x99\xa4\xe6\xad\xa4\xe8\xae\xb0\xe5\xbd\x95\xef\xbc\x9f"),
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (ret != QMessageBox::Yes) return;
+
+    emit historyDeleteRequested(m_selectedPath);
+    resetState();
 }
 
 void SongSelectWidget::onHistoryContextMenu(const QPoint& pos)
@@ -672,6 +822,7 @@ void SongSelectWidget::setCardsVisible(bool visible)
 {
     m_cardsContainer->setVisible(visible);
     m_placeholderLabel->setVisible(!visible);
+    m_loadingWidget->hide();
 }
 
 void SongSelectWidget::updateLaneButtons()
@@ -692,6 +843,20 @@ void SongSelectWidget::updateLaneButtons()
             "QPushButton { background-color: transparent; color: #888888; "
             "border: 2px solid #333333; border-radius: 6px; font-size: 14px; }"
             "QPushButton:hover { border-color: #00ff88; color: #00ff88; }");
+    }
+}
+
+void SongSelectWidget::updateSurvivalButton()
+{
+    if (m_survivalMode) {
+        m_survivalBtn->setStyleSheet(
+            "QPushButton { background-color: #ff4444; color: #ffffff; "
+            "font-weight: bold; border: 2px solid #ff4444; border-radius: 6px; font-size: 14px; }");
+    } else {
+        m_survivalBtn->setStyleSheet(
+            "QPushButton { background-color: transparent; color: #888888; "
+            "border: 2px solid #333333; border-radius: 6px; font-size: 14px; }"
+            "QPushButton:hover { border-color: #ff4444; color: #ff4444; }");
     }
 }
 
@@ -717,7 +882,7 @@ void SongSelectWidget::updateScoreHistory()
 
     QFileInfo fi(m_selectedPath);
     QVector<LeaderboardEntry> entries =
-        m_leaderboardMgr->entriesForSong(fi.size(), m_laneCount);
+        m_leaderboardMgr->entriesForSong(fi.size(), m_laneCount, m_survivalMode);
 
     if (entries.isEmpty()) {
         m_scoreHistoryTitle->setText(
@@ -763,6 +928,56 @@ void SongSelectWidget::updateScoreHistory()
             labels[j]->clear();
         }
     }
+}
+
+int SongSelectWidget::calculateDifficulty(const CacheEntry& entry) const
+{
+    const auto& notes = entry.notes;
+    if (notes.size() < 2) return 1;
+
+    double durationMin = qMax(1.0, entry.durationMs / 60000.0);
+
+    // 1) 音符密度（notes/min），归一化到 [0,1]
+    double density = notes.size() / durationMin;
+    double densityN = qBound(0.0, density / 400.0, 1.0);
+
+    // 2) 短间隔占比（<100ms 的连续音符对 / 总对数）
+    int shortGaps = 0;
+    int totalGaps = 0;
+    for (int i = 1; i < notes.size(); ++i) {
+        qint64 gap = notes[i].first - notes[i - 1].first;
+        if (gap > 0) {
+            ++totalGaps;
+            if (gap < 100) ++shortGaps;
+        }
+    }
+    double shortGapRatio = (totalGaps > 0)
+        ? static_cast<double>(shortGaps) / totalGaps : 0.0;
+
+    // 3) BPM 速度因子（120→0, 220→1）
+    double bpmN = qBound(0.0, (entry.bpm - 120.0) / 100.0, 1.0);
+
+    // 4) 最长密集段（平均间隔 <150ms 的连续段）
+    int longestBurst = 0, curBurst = 0;
+    for (int i = 1; i < notes.size(); ++i) {
+        qint64 gap = notes[i].first - notes[i - 1].first;
+        if (gap > 0 && gap < 150) {
+            ++curBurst;
+            if (curBurst > longestBurst) longestBurst = curBurst;
+        } else {
+            curBurst = 0;
+        }
+    }
+    double burstN = qBound(0.0, longestBurst / 40.0, 1.0);
+
+    // 加权综合
+    double raw = densityN * 0.40
+               + shortGapRatio * 0.25
+               + bpmN * 0.15
+               + burstN * 0.20;
+
+    int stars = qRound(1.0 + raw * 9.0);
+    return qBound(1, stars, 10);
 }
 
 QString SongSelectWidget::formatFileSize(qint64 bytes) const

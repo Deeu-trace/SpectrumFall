@@ -13,6 +13,7 @@ struct LeaderboardEntry
     qint64  songDurationMs; ///< 音频时长（毫秒）
     float   bpm;            ///< 检测到的 BPM
     int     laneCount;      ///< 4 或 6（不同键数各自一榜）
+    bool    survival;       ///< 是否为生存模式成绩
     QString playerName;     ///< 玩家名
     int     score;          ///< 总分
     int     perfect;        ///< Perfect 数
@@ -36,11 +37,11 @@ public:
     /// 获取所有条目
     QVector<LeaderboardEntry> allEntries() const;
 
-    /// 获取指定歌曲+键数的全部条目（按分数降序，同分新者靠前）
-    QVector<LeaderboardEntry> entriesForSong(qint64 songFileSize, int laneCount) const;
+    /// 获取指定歌曲+键数+模式的全部条目（按分数降序，同分新者靠前）
+    QVector<LeaderboardEntry> entriesForSong(qint64 songFileSize, int laneCount, bool survival = false) const;
 
-    /// 获取指定歌曲+键数的前 N 名（默认 50）
-    QVector<LeaderboardEntry> topEntries(qint64 songFileSize, int laneCount, int limit = 50) const;
+    /// 获取指定歌曲+键数+模式的前 N 名（默认 50）
+    QVector<LeaderboardEntry> topEntries(qint64 songFileSize, int laneCount, int limit = 50, bool survival = false) const;
 
     /// 添加一条成绩。返回本次排名（1-based）；返回 0 表示未进入前 50 名（已被截断）。
     int addEntry(const LeaderboardEntry& entry);
@@ -48,8 +49,14 @@ public:
     /// 删除指定条目（按 游玩时间+玩家名+分数 匹配）
     void removeEntry(const QDateTime& playedAt, const QString& playerName, int score);
 
-    /// 清空指定歌曲+键数的整张榜
-    void clearSong(qint64 songFileSize, int laneCount);
+    /// 清空指定歌曲+键数+模式的整张榜
+    void clearSong(qint64 songFileSize, int laneCount, bool survival = false);
+
+    /// 导出全部排行榜数据到指定文件
+    bool exportToFile(const QString& filePath) const;
+
+    /// 从指定文件导入排行榜数据（合并，去重）
+    int importFromFile(const QString& filePath);
 
     /// 本机默认玩家名（用于结算页预填）
     QString myName() const;

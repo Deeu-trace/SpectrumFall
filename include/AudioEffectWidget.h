@@ -8,6 +8,7 @@ class QLabel;
 class QPushButton;
 class QButtonGroup;
 class QStackedWidget;
+class QFrame;
 /// 音频特效浮层面板
 /// 三种效果（回声/滤波/变调）通过 tab 互斥切换，滑块实时调节
 class AudioEffectWidget : public QWidget
@@ -35,8 +36,18 @@ private:
     void buildUI();
     void selectTab(int index);
     void syncAllParams();
+    void restyle(const struct ThemePalette& p);
 
     AudioEffectProcessor* m_processor;
+
+    // 主题相关：需要动态换色的关键控件
+    QFrame* m_bgPanel;
+    QLabel* m_titleLabel;
+    QLabel* m_hintLabel;        // 直通页提示
+    QLabel* m_pitchHintLabel;   // 变调页提示
+    QLabel* m_filterTypeLabel;  // 滤波类型文字
+    QVector<QLabel*> m_valLabels;  // 所有数值标签（绿色）
+    QVector<QLabel*> m_rowLabels;  // 所有行标签（暗色）
 
     // Tab 按钮
     QButtonGroup* m_tabGroup;

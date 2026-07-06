@@ -139,6 +139,21 @@ QPushButton#backButton:pressed {
     padding: 12px 20px 8px 20px;
 }
 
+QPushButton#backButton:disabled {
+    background-color: #10162a;
+    color: #3a3a50;
+    border: 1px solid #141a30;
+}
+
+/* ═══════════ 带图标按钮 — 图标下移微调 ═══════════ */
+/* 调整方法: 修改 padding-top 数值即可 (当前 12px = 原10px + 2px下移) */
+QPushButton[iconPad="true"] {
+    padding-top: 12px;
+}
+QPushButton#menuButton[iconPad="true"] {
+    padding-top: 16px;
+}
+
 /* ═══════════════ 播放按钮 ═══════════════ */
 QPushButton#playButton {
     background: qlineargradient(x1:0,y1:0,x2:0,y2:1,

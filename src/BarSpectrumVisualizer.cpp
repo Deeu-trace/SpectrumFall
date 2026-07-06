@@ -1,4 +1,5 @@
 #include "BarSpectrumVisualizer.h"
+#include "ThemeManager.h"
 #include <QPainter>
 #include <QPaintEvent>
 #include <algorithm>
@@ -44,7 +45,8 @@ void BarSpectrumVisualizer::paintEvent(QPaintEvent* event)
     painter.setRenderHint(QPainter::Antialiasing);
 
     // 背景
-    painter.fillRect(rect(), QColor(26, 26, 46));
+    ThemePalette p = ThemeManager::instance()->gamePalette();
+    painter.fillRect(rect(), QColor(p.visBg));
 
     if (m_magnitude.isEmpty()) {
         return;
@@ -68,21 +70,15 @@ void BarSpectrumVisualizer::paintEvent(QPaintEvent* event)
         int x = i * (barWidth + spacing) + spacing;
         int y = h - barHeight;
 
-        // 颜色渐变：绿→黄→红
-        QColor barColor;
-        if (val < 0.5f) {
-            // 绿到黄
-            float t = val * 2.0f;
-            barColor.setRedF(t);
-            barColor.setGreenF(1.0f);
-            barColor.setBlueF(0.0f);
-        } else {
-            // 黄到红
-            float t = (val - 0.5f) * 2.0f;
-            barColor.setRedF(1.0f);
-            barColor.setGreenF(1.0f - t);
-            barColor.setBlueF(0.0f);
-        }
+        // 颜色渐变：primary → secondary（主题色）
+        QColor c1(p.primary);
+        QColor c2(p.secondary);
+        float t = qBound(0.0f, val, 1.0f);
+        QColor barColor(
+            static_cast<int>(c1.red()   + (c2.red()   - c1.red())   * t),
+            static_cast<int>(c1.green() + (c2.green() - c1.green()) * t),
+            static_cast<int>(c1.blue()  + (c2.blue()  - c1.blue())  * t)
+        );
 
         // 绘制柱子
         painter.setPen(Qt::NoPen);

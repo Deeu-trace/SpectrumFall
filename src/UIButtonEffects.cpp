@@ -1,4 +1,5 @@
 #include "UIButtonEffects.h"
+#include "ThemeManager.h"
 
 #include <QApplication>
 #include <QPushButton>
@@ -52,10 +53,11 @@ void ButtonEffectFilter::playClickSound()
 // ── 辉光效果（直接设置，无动画） ──────────────────────────────────
 static QColor glowColorForButton(QPushButton* btn)
 {
+    ThemePalette p = ThemeManager::instance()->menuPalette();
     QString name = btn->objectName();
     if (name == QStringLiteral("backButton"))
-        return QColor(189, 147, 249);  // 紫色辉光
-    return QColor(0, 255, 136);        // 绿色辉光（默认 / menu / action）
+        return QColor(p.glowSecondary);
+    return QColor(p.glowPrimary);
 }
 
 void ButtonEffectFilter::applyGlow(QPushButton* btn)

@@ -140,6 +140,31 @@ void BeatDetector::analyze(const QVector<float>& pcm, int sampleRate, int laneCo
         }
     }
     m_beatPoints = filtered;
+
+    // 6. 计算音频特征（用于情绪分类）
+    if (!magnitudeCache.isEmpty()) {
+        double totalLowEnergy = 0;
+        double totalAllEnergy = 0;
+        int frameCount = 0;
+        for (const auto& mag : magnitudeCache) {
+            if (mag.isEmpty()) continue;
+            int binCount = mag.size();
+            int lowBinEnd = qMax(1, binCount / 5); // 前 20% 频段
+            double lowE = 0, allE = 0;
+            for (int b = 0; b < binCount; ++b) {
+                double e = static_cast<double>(mag[b]);
+                allE += e;
+                if (b < lowBinEnd) lowE += e;
+            }
+            totalLowEnergy += lowE;
+            totalAllEnergy += allE;
+            ++frameCount;
+        }
+        m_lowFreqRatio = (totalAllEnergy > 0)
+            ? static_cast<float>(totalLowEnergy / totalAllEnergy) : 0.0f;
+        m_avgEnergy = (frameCount > 0)
+            ? static_cast<float>(totalAllEnergy / frameCount / (m_fftSize / 2)) : 0.0f;
+    }
 }
 
 float BeatDetector::bpm() const
@@ -150,6 +175,15 @@ float BeatDetector::bpm() const
 const QVector<BeatPoint>& BeatDetector::beatPoints() const
 {
     return m_beatPoints;
+}
+
+AudioFeatures BeatDetector::audioFeatures() const
+{
+    AudioFeatures f;
+    f.bpm = m_bpm;
+    f.lowFreqRatio = m_lowFreqRatio;
+    f.avgEnergy = m_avgEnergy;
+    return f;
 }
 
 // ── 对数频带轨道分配 ────────────────────────────────────

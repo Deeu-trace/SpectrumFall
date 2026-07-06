@@ -8,6 +8,7 @@ class QPushButton;
 class QLabel;
 class QProgressBar;
 class QListWidget;
+class QSoundEffect;
 class QListWidgetItem;
 class QMenu;
 class QDialog;
@@ -32,6 +33,9 @@ public:
     /// Get currently selected lane count (4 or 6)
     int selectedLaneCount() const;
 
+    /// Whether survival mode is selected
+    bool isSurvivalMode() const;
+
     /// Set analysis progress (0-100), manages analyzing-state UI
     void setAnalysisProgress(int percent);
 
@@ -50,8 +54,9 @@ public:
     /// Refresh history list
     void refreshHistory(const QVector<CacheEntry>& entries);
 
-    /// Load from cache, set UI to analyzed state
-    void loadFromCache(const QString& filePath, float bpm, qint64 durationMs);
+    /// Load from cache, set UI to analyzed state, compute difficulty
+    void loadFromCache(const QString& filePath, float bpm, qint64 durationMs,
+                       const QVector<QPair<qint64, int>>& notes = {});
 
     /// Show loading state (disable all buttons + show spinner)
     void showLoadingState();
@@ -82,13 +87,16 @@ private slots:
     void onHistoryItemClicked(QListWidgetItem* item);
     void onHistoryContextMenu(const QPoint& pos);
     void onHistoryDeleteClicked();
+    void onDeleteCurrentClicked();
     void onLaneToggled();
 
 private:
     void enterAnalyzingState();
     void exitAnalyzingState();
     void updateLaneButtons();
+    void updateSurvivalButton();
     void setCardsVisible(bool visible);
+    int calculateDifficulty(const CacheEntry& entry) const;
     QString formatFileSize(qint64 bytes) const;
     QString formatDuration(qint64 ms) const;
     QString formatDateTime(const QDateTime& dt) const;
@@ -106,6 +114,7 @@ private:
     // Right panel
     QWidget* m_rightPanel;           ///< Right panel container
     QLabel* m_placeholderLabel;      ///< Placeholder when no file selected
+    QWidget* m_loadingWidget;        ///< Loading state widget in right panel
     QWidget* m_cardsContainer;       ///< Container for 3 cards
 
     // Card 1: File info
@@ -114,11 +123,13 @@ private:
     QLabel* m_fileSizeLabel;         ///< File size
     QLabel* m_durationLabel;         ///< Duration
     QLabel* m_bpmLabel;              ///< BPM display
+    QLabel* m_difficultyLabel;       ///< Difficulty star rating
     QLabel* m_errorLabel;            ///< Error message
     QPushButton* m_analyzeBtn;       ///< Analyze BPM button
+    QPushButton* m_deleteBtn;        ///< Delete cache entry button
     QProgressBar* m_progressBar;     ///< Analysis progress bar
-    SpinnerWidget* m_spinner;        ///< Spinner animation
-    QDialog* m_spinnerDialog;        ///< Loading dialog (for history loading)
+    SpinnerWidget* m_spinner;        ///< Spinner animation (analysis)
+    SpinnerWidget* m_loadingSpinner; ///< Persistent loading spinner in right panel
 
     // Card 2: Score history
     QFrame* m_scoreCard;             ///< Score history card frame
@@ -127,10 +138,17 @@ private:
     QLabel* m_scoreHist2;            ///< Recent score row 2
     QLabel* m_scoreHist3;            ///< Recent score row 3
 
+    // Icon labels
+    QLabel* m_fileIconLabel;       ///< Music note icon for file name
+    QLabel* m_scoreIconLabel;      ///< Trophy icon for score card
+    QLabel* m_modeIconLabel;       ///< Gamepad icon for mode card
+
     // Card 3: Game mode
     QFrame* m_modeCard;              ///< Game mode card frame
     QPushButton* m_4kBtn;            ///< 4-key mode button
     QPushButton* m_6kBtn;            ///< 6-key mode button
+    QPushButton* m_survivalBtn;      ///< Survival mode toggle button
+    bool m_survivalMode = false;     ///< Whether survival mode is active
 
     // Bottom action buttons
     QPushButton* m_visualizeBtn;     ///< Visualize mode button
@@ -139,6 +157,7 @@ private:
     QPushButton* m_backBtn;          ///< Back button
 
     LeaderboardManager* m_leaderboardMgr; ///< Leaderboard data source
+    QSoundEffect* m_clickSound;           ///< Click sound for history items
     QString m_selectedPath;          ///< Currently selected file path
     bool m_analysisDone;             ///< Whether analysis is complete
     int m_laneCount;                 ///< Selected lane count (4 or 6, default 6)

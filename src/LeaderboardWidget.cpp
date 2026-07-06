@@ -12,7 +12,10 @@
 #include <QHeaderView>
 #include <QDialog>
 #include <QFont>
+#include <QMessageBox>
+#include <QFileDialog>
 #include <algorithm>
+#include <QIcon>
 
 // -- card style constants --
 static const QString CARD_BG = "rgba(22, 33, 62, 160)";
@@ -54,7 +57,7 @@ static void clearLayout(QLayout* layout)
 
 // == Constructor ==
 LeaderboardWidget::LeaderboardWidget(LeaderboardManager* lb, QWidget* parent)
-    : QWidget(parent), m_lb(lb), m_cardsLayout(nullptr), m_hintLabel(nullptr), m_currentFilter(0)
+    : QWidget(parent), m_lb(lb), m_cardsLayout(nullptr), m_hintLabel(nullptr), m_currentFilter(0), m_showSurvival(false)
 {
     setupUI();
 }
@@ -95,6 +98,57 @@ void LeaderboardWidget::setupUI()
     m_filter4KBtn  = makeFilterBtn("4K", 4);
     m_filter6KBtn  = makeFilterBtn("6K", 6);
 
+    filterRow->addSpacing(12);
+
+    // 分隔线
+    QFrame* sep = new QFrame(this);
+    sep->setFrameShape(QFrame::VLine);
+    sep->setStyleSheet("color: #1f1f3a;");
+    sep->setFixedWidth(1);
+    filterRow->addWidget(sep);
+
+    filterRow->addSpacing(8);
+
+    m_filterNormalBtn = new QPushButton(
+        QString::fromUtf8("\xe6\x99\xae\xe9\x80\x9a"), this);
+    m_filterNormalBtn->setMinimumSize(80, 34);
+    connect(m_filterNormalBtn, &QPushButton::clicked, this, [this]() {
+        m_showSurvival = false;
+        updateFilterButtons();
+        rebuildCards();
+    });
+    filterRow->addWidget(m_filterNormalBtn);
+
+    m_filterSurvivalBtn = new QPushButton(
+        QString::fromUtf8("\xe7\x94\x9f\xe5\xad\x98"), this);
+    m_filterSurvivalBtn->setMinimumSize(80, 34);
+    connect(m_filterSurvivalBtn, &QPushButton::clicked, this, [this]() {
+        m_showSurvival = true;
+        updateFilterButtons();
+        rebuildCards();
+    });
+    filterRow->addWidget(m_filterSurvivalBtn);
+
+    filterRow->addSpacing(20);
+
+    // 导出/导入按钮
+    QString ioBtnStyle =
+        "QPushButton { background: rgba(15,52,96,180); color: #8888aa; "
+        "border: 1px solid #0f3460; border-radius: 6px; font-size: 13px; padding: 0 14px; }"
+        "QPushButton:hover { border-color: #00ff88; color: #00ff88; }";
+
+    m_exportBtn = new QPushButton(QString::fromUtf8("\xe5\xaf\xbc\xe5\x87\xba"), this);
+    m_exportBtn->setMinimumSize(70, 34);
+    m_exportBtn->setStyleSheet(ioBtnStyle);
+    filterRow->addWidget(m_exportBtn);
+    connect(m_exportBtn, &QPushButton::clicked, this, &LeaderboardWidget::onExportClicked);
+
+    m_importBtn = new QPushButton(QString::fromUtf8("\xe5\xaf\xbc\xe5\x85\xa5"), this);
+    m_importBtn->setMinimumSize(70, 34);
+    m_importBtn->setStyleSheet(ioBtnStyle);
+    filterRow->addWidget(m_importBtn);
+    connect(m_importBtn, &QPushButton::clicked, this, &LeaderboardWidget::onImportClicked);
+
     filterRow->addStretch();
     layout->addLayout(filterRow);
     updateFilterButtons();
@@ -130,6 +184,8 @@ void LeaderboardWidget::setupUI()
     QPushButton* backBtn = new QPushButton(QString::fromUtf8("\xe8\xbf\x94\xe5\x9b\x9e\xe4\xb8\xbb\xe8\x8f\x9c\xe5\x8d\x95"), this);
     backBtn->setMinimumSize(160, 42);
     backBtn->setObjectName("backButton");
+    backBtn->setIcon(QIcon(":/icons/arrow-left.svg"));
+    backBtn->setIconSize(QSize(20, 20));
     QHBoxLayout* btnRow = new QHBoxLayout();
     btnRow->addStretch(); btnRow->addWidget(backBtn); btnRow->addStretch();
     layout->addLayout(btnRow);
@@ -147,6 +203,11 @@ void LeaderboardWidget::updateFilterButtons()
     m_filterAllBtn->setStyleSheet(m_currentFilter == 0 ? sel : unsel);
     m_filter4KBtn->setStyleSheet(m_currentFilter == 4 ? sel : unsel);
     m_filter6KBtn->setStyleSheet(m_currentFilter == 6 ? sel : unsel);
+
+    QString survSel = "QPushButton { background: #e94560; color: #ffffff; border: none; "
+                      "border-radius: 6px; font-weight: bold; font-size: 14px; }";
+    m_filterNormalBtn->setStyleSheet(!m_showSurvival ? sel : unsel);
+    m_filterSurvivalBtn->setStyleSheet(m_showSurvival ? survSel : unsel);
 }
 
 // == Data loading ==
@@ -194,14 +255,17 @@ QWidget* LeaderboardWidget::buildCard(const QString& songName, const QVector<Lea
 {
     QVector<LeaderboardEntry> e4k, e6k;
     int max4k = 0, max6k = 0;
-    int playCount = entries.size();
+    int playCount = 0;
     for (const LeaderboardEntry& e : entries) {
+        if (e.survival != m_showSurvival) continue;
+        ++playCount;
         int ms = e.totalNotes * 300;
         if (e.laneCount == 4) { e4k.append(e); if (ms > max4k) max4k = ms; }
         else                   { e6k.append(e); if (ms > max6k) max6k = ms; }
     }
     if (m_currentFilter == 4 && e4k.isEmpty()) return nullptr;
     if (m_currentFilter == 6 && e6k.isEmpty()) return nullptr;
+    if (playCount == 0) return nullptr;
 
     QFrame* card = new QFrame();
     card->setStyleSheet(QStringLiteral("QFrame { background: %1; border: 1px solid %2; border-radius: 12px; }").arg(CARD_BG, CARD_BORDER));
@@ -326,7 +390,7 @@ QWidget* LeaderboardWidget::buildTop3(const QVector<LeaderboardEntry>& me, int m
 // == Full leaderboard dialog ==
 void LeaderboardWidget::showFullDialog(const QString& songName, qint64 fileSize, int mode)
 {
-    QVector<LeaderboardEntry> entries = m_lb->entriesForSong(fileSize, mode);
+    QVector<LeaderboardEntry> entries = m_lb->entriesForSong(fileSize, mode, m_showSurvival);
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("%1 - %2K").arg(songName).arg(mode));
     dlg.setMinimumSize(750, 500);
@@ -421,6 +485,59 @@ void LeaderboardWidget::showFullDialog(const QString& songName, qint64 fileSize,
     dl->addLayout(br);
     connect(cb, &QPushButton::clicked, &dlg, &QDialog::accept);
     dlg.exec();
+}
+
+// == Export / Import ==
+void LeaderboardWidget::onExportClicked()
+{
+    if (!m_lb || m_lb->allEntries().isEmpty()) {
+        QMessageBox::information(this,
+            QString::fromUtf8("\xe5\xaf\xbc\xe5\x87\xba"),
+            QString::fromUtf8("\xe6\x8e\x92\xe8\xa1\x8c\xe6\xa6\x9c\xe4\xb8\xba\xe7\xa9\xba\xef\xbc\x8c\xe6\x97\xa0\xe6\xb3\x95\xe5\xaf\xbc\xe5\x87\xba"));
+        return;
+    }
+
+    QString path = QFileDialog::getSaveFileName(this,
+        QString::fromUtf8("\xe5\xaf\xbc\xe5\x87\xba\xe6\x8e\x92\xe8\xa1\x8c\xe6\xa6\x9c"),
+        QStringLiteral("leaderboard.json"),
+        QStringLiteral("JSON (*.json)"));
+    if (path.isEmpty()) return;
+
+    if (m_lb->exportToFile(path)) {
+        QMessageBox::information(this,
+            QString::fromUtf8("\xe5\xaf\xbc\xe5\x87\xba\xe6\x88\x90\xe5\x8a\x9f"),
+            QString::fromUtf8("\xe6\x8e\x92\xe8\xa1\x8c\xe6\xa6\x9c\xe5\xb7\xb2\xe5\xaf\xbc\xe5\x87\xba\xe5\x88\xb0:\n%1").arg(path));
+    } else {
+        QMessageBox::warning(this,
+            QString::fromUtf8("\xe5\xaf\xbc\xe5\x87\xba\xe5\xa4\xb1\xe8\xb4\xa5"),
+            QString::fromUtf8("\xe6\x97\xa0\xe6\xb3\x95\xe5\x86\x99\xe5\x85\xa5\xe6\x96\x87\xe4\xbb\xb6"));
+    }
+}
+
+void LeaderboardWidget::onImportClicked()
+{
+    QString path = QFileDialog::getOpenFileName(this,
+        QString::fromUtf8("\xe5\xaf\xbc\xe5\x85\xa5\xe6\x8e\x92\xe8\xa1\x8c\xe6\xa6\x9c"),
+        QString(),
+        QStringLiteral("JSON (*.json)"));
+    if (path.isEmpty()) return;
+
+    int result = m_lb->importFromFile(path);
+    if (result < 0) {
+        QMessageBox::warning(this,
+            QString::fromUtf8("\xe5\xaf\xbc\xe5\x85\xa5\xe5\xa4\xb1\xe8\xb4\xa5"),
+            QString::fromUtf8("\xe6\x96\x87\xe4\xbb\xb6\xe6\xa0\xbc\xe5\xbc\x8f\xe9\x94\x99\xe8\xaf\xaf\xe6\x88\x96\xe7\x89\x88\xe6\x9c\xac\xe4\xb8\x8d\xe5\x8c\xb9\xe9\x85\x8d"));
+    } else if (result == 0) {
+        QMessageBox::information(this,
+            QString::fromUtf8("\xe5\xaf\xbc\xe5\x85\xa5"),
+            QString::fromUtf8("\xe6\xb2\xa1\xe6\x9c\x89\xe6\x96\xb0\xe6\x95\xb0\xe6\x8d\xae\xef\xbc\x8c\xe6\x89\x80\xe6\x9c\x89\xe8\xae\xb0\xe5\xbd\x95\xe5\xb7\xb2\xe5\xad\x98\xe5\x9c\xa8"));
+    } else {
+        QMessageBox::information(this,
+            QString::fromUtf8("\xe5\xaf\xbc\xe5\x85\xa5\xe6\x88\x90\xe5\x8a\x9f"),
+            QString::fromUtf8("\xe6\x88\x90\xe5\x8a\x9f\xe5\xaf\xbc\xe5\x85\xa5 %1 \xe6\x9d\xa1\xe6\x96\xb0\xe8\xae\xb0\xe5\xbd\x95").arg(result));
+        loadEntries();
+        rebuildCards();
+    }
 }
 
 // == Public interface ==

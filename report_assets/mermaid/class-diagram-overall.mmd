@@ -1,0 +1,177 @@
+classDiagram
+    direction TB
+
+    class MainWindow {
+        -QStackedWidget* m_stack
+        -AudioEngine* m_audioEngine
+        -BeatDetector* m_beatDetector
+        -NoteGenerator* m_noteGenerator
+        -ScoreManager* m_scoreManager
+        -CacheManager* m_cacheManager
+        -LeaderboardManager* m_leaderboardManager
+        -ChartManager* m_chartManager
+        -MainMenuWidget* m_mainMenuPage
+        -SongSelectWidget* m_songSelectPage
+        -VisualizationWidget* m_visPage
+        -GameWidget* m_gamePage
+        -ResultWidget* m_resultPage
+        -LeaderboardWidget* m_leaderboardPage
+        -ChartEditorWidget* m_chartEditorPage
+        -ThemeEditorWidget* m_themeEditorPage
+        +MainWindow(QWidget* parent)
+        -void setupUI()
+        -void connectSignals()
+        -void navigateTo(int pageIndex)
+        -void onAnalyzeRequested(QString path)
+        -void onGameRequested()
+        -void onGameFinished()
+        -void onScoreSubmitted(QString playerName)
+    }
+
+    class AudioEngine {
+        -QMediaPlayer* m_player
+        -QAudioOutput* m_audioOutput
+        -QVector~float~ m_pcmBuffer
+        -int m_sampleRate
+        -qint64 m_durationMs
+        -QAudioSink* m_realtimeSink
+        +bool loadFile(QString path)
+        +void play() void pause() void seek(qint64)
+        +QVector~float~ getWindowAt(qint64 ms, int windowSize)
+        +void startRealtimePlayback(AudioEffectProcessor*)
+        +const QVector~float~& pcmData()
+        +signal loadComplete(bool)
+    }
+
+    class FFTAnalyzer {
+        -int m_windowSize m_log2N
+        -QVector~float~ m_hannWindow
+        -QVector~float~ m_twiddleCos m_twiddleSin
+        +FFTAnalyzer(int windowSize)
+        +void compute(QVector~float~ input, QVector~float~& magnitude)
+        -void buildTwiddleFactors()
+        -void buildHannWindow()
+        -static int bitReverse(int x, int log2n)
+    }
+
+    class BeatDetector {
+        -float m_bpm
+        -QVector~BeatPoint~ m_beatPoints
+        -int m_fftSize m_hopSize m_laneCount
+        -volatile bool m_cancelled
+        -int m_hysteresisCount[6]
+        -int m_laneStarvation[6]
+        +void analyze(QVector~float~ pcm, int sampleRate, int laneCount)
+        +void requestCancel()
+        +float bpm()
+        +QVector~BeatPoint~ beatPoints()
+        +AudioFeatures audioFeatures()
+        +signal progressChanged(int percent)
+    }
+
+    class NoteGenerator {
+        +QVector~GameNote~ generate(QVector~BeatPoint~, qint64 minGapMs, int laneCount)
+    }
+
+    class GameWidget {
+        -AudioEngine* m_audioEngine
+        -ScoreManager* m_scoreManager
+        -QVector~GameNote~ m_notes
+        -QElapsedTimer m_gameClock
+        -qint64 m_startPosMs m_totalPausedMs
+        -int m_laneCount
+        -bool m_survivalMode
+        -int m_hp m_maxHp
+        -QVector~HitParticle~ m_particles
+        +void startGame(QVector~GameNote~, int laneCount, bool survival)
+        +void pauseGame() void resumeGame()
+        +signal gameFinished() gameOver() backRequested()
+        -qint64 getGameTime()
+        -void judgeLane(int) judgeHoldRelease(int)
+        -void mergeHolds()
+    }
+
+    class ScoreManager {
+        -int m_score m_combo m_maxCombo
+        -int m_perfectCount m_goodCount m_missCount
+        +void reset()
+        +int judgeHit(qint64 hitTime, qint64 noteTime)
+        +int checkHit(qint64 hitTime, qint64 noteTime)
+        +void scoreHoldComplete(int headResult)
+        +void addMiss()
+        +QString grade(int totalNotes)
+        +signal scoreChanged(int) comboChanged(int)
+    }
+
+    class VisualizationWidget {
+        -AudioEngine* m_audioEngine
+        -FFTAnalyzer m_fftAnalyzer
+        -AudioEffectProcessor* m_effectProcessor
+        -QStackedWidget* m_visStack
+        -BarSpectrumVisualizer* m_barWidget
+        -CircularSpectrumVisualizer* m_circularWidget
+        -WaveformVisualizer* m_waveformWidget
+        -WaterfallVisualizer* m_waterfallWidget
+        -GLSpectrumWidget* m_glWidget
+        -QTimer* m_renderTimer
+        +void startVisualization() stopVisualization()
+        -void onRenderTick()
+        +signal backRequested()
+    }
+
+    class VisualizerBase {
+        <<abstract>>
+        -QVector~float~ m_magnitude
+        -QVector~float~ m_waveform
+        +virtual void setSpectrumData(QVector~float~)
+        +virtual void setWaveformData(QVector~float~)
+    }
+
+    class BarSpectrumVisualizer {
+        -int m_barCount
+        -QVector~float~ m_peakValues m_peakFallSpeed
+        +void setSpectrumData(QVector~float~) override
+        -void paintEvent(QPaintEvent*) override
+    }
+
+    class CacheManager {
+        -QString m_cachePath
+        -QVector~CacheEntry~ m_entries
+        +const CacheEntry* find(QString filePath)
+        +void upsert(CacheEntry)
+        +bool hasValidCache(QString filePath)
+        -void loadFromDisk() saveToDisk()
+    }
+
+    class ThemeManager {
+        <<singleton>>
+        -static ThemeManager* s_instance
+        -ThemePalette m_menuPalette m_gamePalette
+        -bool m_autoMoodEnabled m_manualGameOverride
+        +static ThemeManager* instance()
+        +void applyGameTheme(Mood)
+        +void applyMenuTheme(Mood)
+        +ThemePalette gamePalette() menuPalette()
+        +signal gameThemeChanged(ThemePalette)
+        +signal menuThemeChanged(ThemePalette)
+    }
+
+    MainWindow --> AudioEngine : 持有
+    MainWindow --> BeatDetector : 持有
+    MainWindow --> NoteGenerator : 持有
+    MainWindow --> ScoreManager : 持有
+    MainWindow --> CacheManager : 持有
+    MainWindow --> GameWidget : 持有
+    MainWindow --> VisualizationWidget : 持有
+    AudioEngine --> FFTAnalyzer : getWindowAt 使用
+    BeatDetector --> FFTAnalyzer : 内部聚合
+    NoteGenerator --> BeatDetector : 消费 BeatPoint
+    GameWidget --> AudioEngine : 持有
+    GameWidget --> ScoreManager : 持有
+    VisualizationWidget --> AudioEngine : 持有
+    VisualizationWidget --> FFTAnalyzer : 持有
+    VisualizationWidget --> VisualizerBase : 管理
+    VisualizerBase <|-- BarSpectrumVisualizer
+    VisualizerBase <|-- CircularSpectrumVisualizer
+    VisualizerBase <|-- WaveformVisualizer
+    VisualizerBase <|-- WaterfallVisualizer

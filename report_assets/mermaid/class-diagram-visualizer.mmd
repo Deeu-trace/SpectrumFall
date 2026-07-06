@@ -1,0 +1,69 @@
+classDiagram
+    direction LR
+
+    class VisualizerBase {
+        <<abstract>>
+        #QVector~float~ m_magnitude
+        #QVector~float~ m_waveform
+        +virtual void setSpectrumData(QVector~float~ magnitude)*
+        +virtual void setWaveformData(QVector~float~ samples)*
+    }
+
+    class BarSpectrumVisualizer {
+        -int m_barCount = 64
+        -QVector~float~ m_peakValues
+        -QVector~float~ m_peakFallSpeed
+        +void setSpectrumData(QVector~float~) override
+        -void paintEvent(QPaintEvent*) override
+    }
+
+    class CircularSpectrumVisualizer {
+        -int m_segments = 128
+        -float m_rotationAngle
+        +void setSpectrumData(QVector~float~) override
+        -void paintEvent(QPaintEvent*) override
+    }
+
+    class WaveformVisualizer {
+        +void setWaveformData(QVector~float~) override
+        -void paintEvent(QPaintEvent*) override
+    }
+
+    class WaterfallVisualizer {
+        -QList~QVector~float~~ m_history
+        -int m_maxHistory = 128
+        +void setSpectrumData(QVector~float~) override
+        -void paintEvent(QPaintEvent*) override
+        -QColor energyToColor(float)
+    }
+
+    class GLSpectrumWidget {
+        -QOpenGLShaderProgram* m_bgShader
+        -QOpenGLShaderProgram* m_barShader
+        -QOpenGLShaderProgram* m_circleShader
+        -float m_spectrum[256]
+        -float m_peaks[256]
+        -RenderMode m_renderMode
+        +void setSpectrumData(QVector~float~)
+        +void setRenderMode(RenderMode)
+        -void initializeGL() resizeGL() paintGL()
+    }
+
+    class VisualizationWidget {
+        -QStackedWidget* m_visStack
+        -BarSpectrumVisualizer* m_barWidget
+        -CircularSpectrumVisualizer* m_circularWidget
+        -WaveformVisualizer* m_waveformWidget
+        -WaterfallVisualizer* m_waterfallWidget
+        -GLSpectrumWidget* m_glWidget
+        -FFTAnalyzer m_fftAnalyzer
+        -QTimer* m_renderTimer
+        -void onRenderTick()
+    }
+
+    VisualizerBase <|-- BarSpectrumVisualizer
+    VisualizerBase <|-- CircularSpectrumVisualizer
+    VisualizerBase <|-- WaveformVisualizer
+    VisualizerBase <|-- WaterfallVisualizer
+    VisualizationWidget o-- VisualizerBase : 持有
+    VisualizationWidget o-- GLSpectrumWidget : 持有

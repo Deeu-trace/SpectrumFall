@@ -9,6 +9,7 @@
 #include "GLSpectrumWidget.h"
 #include "AudioEffectWidget.h"
 #include "AudioEffectProcessor.h"
+#include "ThemeManager.h"
 
 #include <QPushButton>
 #include <QSlider>
@@ -18,6 +19,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QtMultimedia/QMediaPlayer>
+#include <QIcon>
 
 VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* parent)
     : QWidget(parent)
@@ -76,9 +78,11 @@ VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* pare
     QHBoxLayout* btnLayout = new QHBoxLayout();
     btnLayout->setSpacing(10);
 
-    m_playPauseBtn = new QPushButton(QStringLiteral("播放"), this);
-    m_playPauseBtn->setFixedWidth(70);
+    m_playPauseBtn = new QPushButton(QString::fromUtf8("\xc2\xa0\xe6\x92\xad\xe6\x94\xbe"), this);
+    m_playPauseBtn->setFixedWidth(90);
     m_playPauseBtn->setObjectName("playButton");
+    m_playPauseBtn->setIcon(QIcon(":/icons/play.svg"));
+    m_playPauseBtn->setIconSize(QSize(20, 20));
     btnLayout->addWidget(m_playPauseBtn);
 
     QLabel* volLabel = new QLabel(QStringLiteral("音量"), this);
@@ -112,8 +116,10 @@ VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* pare
     btnLayout->addWidget(m_visModeCombo);
 
     // ── FX 按钮（音频特效开关）──
-    m_fxBtn = new QPushButton(QStringLiteral("FX"), this);
-    m_fxBtn->setFixedSize(40, 28);
+    m_fxBtn = new QPushButton(QString::fromUtf8("\xc2\xa0" "FX"), this);
+    m_fxBtn->setFixedWidth(100);
+    m_fxBtn->setIcon(QIcon(":/icons/audio-waveform.svg"));
+    m_fxBtn->setIconSize(QSize(18, 18));
     m_fxBtn->setCheckable(true);
     m_fxBtn->setStyleSheet(
         "QPushButton { font-size: 12px; font-weight: bold; color: #00ff88; "
@@ -122,13 +128,25 @@ VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* pare
         "QPushButton:checked { background-color: #00ff88; color: #0a0a1e; }");
     btnLayout->addWidget(m_fxBtn);
 
+    // FX 按钮跟随主题换色
+    auto restyleFx = [this](const ThemePalette& p) {
+        m_fxBtn->setStyleSheet(QStringLiteral(
+            "QPushButton { font-size: 12px; font-weight: bold; color: %1; "
+            "  background-color: %2; border: 1px solid %1; border-radius: 4px; }"
+            "QPushButton:hover { background-color: %1; color: %3; }"
+            "QPushButton:checked { background-color: %1; color: %3; }"
+        ).arg(p.primary, p.surface, p.bgDeep));
+    };
+    connect(ThemeManager::instance(), &ThemeManager::menuThemeChanged, this, restyleFx);
+    restyleFx(ThemeManager::instance()->menuPalette());
+
     connect(m_fxBtn, &QPushButton::toggled, this, [this](bool on) {
         if (on) {
             // 开启实时特效播放（暂停 QMediaPlayer，启动 QAudioSink）
             if (m_audioEngine && m_audioEngine->isLoaded()) {
                 m_effectProcessor->resetState();
                 m_audioEngine->startRealtimePlayback(m_effectProcessor);
-                m_playPauseBtn->setText(QStringLiteral("暂停"));
+                m_playPauseBtn->setText(QString::fromUtf8("\xc2\xa0\xe6\x9a\x82\xe5\x81\x9c"));
             }
             m_audioEffectWidget->show();
             m_audioEffectWidget->raise();
@@ -137,7 +155,7 @@ VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* pare
             m_audioEngine->stopRealtimePlayback();
             m_audioEffectWidget->hide();
             m_effectsActive = false;
-            m_playPauseBtn->setText(QStringLiteral("播放"));
+            m_playPauseBtn->setText(QString::fromUtf8("\xc2\xa0\xe6\x92\xad\xe6\x94\xbe"));
         }
     });
 
@@ -172,9 +190,11 @@ VisualizationWidget::VisualizationWidget(AudioEngine* audioEngine, QWidget* pare
 
     btnLayout->addStretch();
 
-    m_backBtn = new QPushButton(QStringLiteral("返回"), this);
-    m_backBtn->setFixedWidth(70);
+    m_backBtn = new QPushButton(QString::fromUtf8("\xc2\xa0\xe8\xbf\x94\xe5\x9b\x9e"), this);
+    m_backBtn->setFixedWidth(90);
     m_backBtn->setObjectName("backButton");
+    m_backBtn->setIcon(QIcon(":/icons/arrow-left.svg"));
+    m_backBtn->setIconSize(QSize(20, 20));
     btnLayout->addWidget(m_backBtn);
 
     controlLayout->addLayout(btnLayout);
@@ -248,6 +268,14 @@ void VisualizationWidget::onRenderTick()
 {
     if (!m_audioEngine || !m_audioEngine->isLoaded()) return;
 
+    // 暂停时跳过渲染更新，避免 visualizer 内部动画（峰值下落、旋转角度等）
+    // 持续推进导致画面微微抽动；同时冻结频谱数据，使暂停画面完全静止
+    if (m_effectsActive) {
+        if (!m_audioEngine->isRealtimePlaying()) return;
+    } else {
+        if (m_audioEngine->state() != QMediaPlayer::PlayingState) return;
+    }
+
     qint64 pos = m_audioEngine->position();
 
     // 只在有实际数据时做 FFT
@@ -284,19 +312,19 @@ void VisualizationWidget::onPlayPauseClicked()
         // 实时特效模式
         if (m_audioEngine->isRealtimePlaying()) {
             m_audioEngine->pause();
-            m_playPauseBtn->setText(QStringLiteral("播放"));
+            m_playPauseBtn->setText(QString::fromUtf8("\xc2\xa0\xe6\x92\xad\xe6\x94\xbe"));
         } else {
             m_audioEngine->play();
-            m_playPauseBtn->setText(QStringLiteral("暂停"));
+            m_playPauseBtn->setText(QString::fromUtf8("\xc2\xa0\xe6\x9a\x82\xe5\x81\x9c"));
         }
     } else {
         // 普通模式
         if (m_audioEngine->state() == QMediaPlayer::PlayingState) {
             m_audioEngine->pause();
-            m_playPauseBtn->setText(QStringLiteral("播放"));
+            m_playPauseBtn->setText(QString::fromUtf8("\xc2\xa0\xe6\x92\xad\xe6\x94\xbe"));
         } else {
             m_audioEngine->play();
-            m_playPauseBtn->setText(QStringLiteral("暂停"));
+            m_playPauseBtn->setText(QString::fromUtf8("\xc2\xa0\xe6\x9a\x82\xe5\x81\x9c"));
         }
     }
 }

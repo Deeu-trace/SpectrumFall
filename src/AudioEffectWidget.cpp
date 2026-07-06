@@ -1,5 +1,6 @@
 #include "AudioEffectWidget.h"
 #include "AudioEffectProcessor.h"
+#include "ThemeManager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -62,7 +63,8 @@ static const char* kFilterTypeBtnQss =
 static QWidget* makeSliderRow(const QString& label, int min, int max, int val,
                               const QString& suffix,
                               QSlider*& outSlider, QLabel*& outVal,
-                              QWidget* parent)
+                              QWidget* parent,
+                              QLabel** outRowLabel = nullptr)
 {
     auto* w = new QWidget(parent);
     w->setStyleSheet("background: transparent;");
@@ -74,6 +76,7 @@ static QWidget* makeSliderRow(const QString& label, int min, int max, int val,
     lb->setFixedWidth(36);
     lb->setStyleSheet("color: #8888aa; font-size: 11px; background: transparent;");
     row->addWidget(lb);
+    if (outRowLabel) *outRowLabel = lb;
 
     outSlider = new QSlider(Qt::Horizontal, w);
     outSlider->setRange(min, max);
@@ -105,6 +108,11 @@ AudioEffectWidget::AudioEffectWidget(AudioEffectProcessor* processor, QWidget* p
     setFixedSize(280, 290);
     buildUI();
     selectTab(0);
+
+    // 接入主题系统
+    connect(ThemeManager::instance(), &ThemeManager::menuThemeChanged,
+            this, &AudioEffectWidget::restyle);
+    restyle(ThemeManager::instance()->menuPalette());
 }
 
 bool AudioEffectWidget::hasActiveEffect() const
@@ -124,6 +132,7 @@ void AudioEffectWidget::buildUI()
     mainLayout->setSpacing(0);
 
     auto* bgPanel = new QFrame(this);
+    m_bgPanel = bgPanel;
     bgPanel->setObjectName("effectBgPanel");
     bgPanel->setStyleSheet(
         "#effectBgPanel {"
@@ -144,6 +153,7 @@ void AudioEffectWidget::buildUI()
         row->setSpacing(4);
 
         auto* title = new QLabel(QStringLiteral("音频特效"), this);
+        m_titleLabel = title;
         title->setStyleSheet("color: #00e090; font-size: 14px; font-weight: bold; background: transparent;");
         row->addWidget(title);
         row->addStretch();
@@ -207,6 +217,7 @@ void AudioEffectWidget::buildUI()
         auto* l = new QVBoxLayout(page);
         l->setAlignment(Qt::AlignCenter);
         auto* hint = new QLabel(QStringLiteral("音频原样输出\n选择效果开始调节"), page);
+        m_hintLabel = hint;
         hint->setAlignment(Qt::AlignCenter);
         hint->setStyleSheet("color: #555; font-size: 11px; background: transparent;");
         l->addWidget(hint);
@@ -220,12 +231,16 @@ void AudioEffectWidget::buildUI()
         l->setSpacing(6);
         l->setContentsMargins(4, 6, 4, 6);
 
+        QLabel* rl = nullptr;
         l->addWidget(makeSliderRow(QStringLiteral("延迟"), 20, 2000, 300, QStringLiteral("ms"),
-                     m_echoDelaySlider, m_echoDelayVal, page));
+                     m_echoDelaySlider, m_echoDelayVal, page, &rl));
+        m_rowLabels.append(rl); m_valLabels.append(m_echoDelayVal);
         l->addWidget(makeSliderRow(QStringLiteral("反馈"), 0, 95, 40, QStringLiteral("%"),
-                     m_echoFeedbackSlider, m_echoFeedbackVal, page));
+                     m_echoFeedbackSlider, m_echoFeedbackVal, page, &rl));
+        m_rowLabels.append(rl); m_valLabels.append(m_echoFeedbackVal);
         l->addWidget(makeSliderRow(QStringLiteral("混合"), 0, 100, 50, QStringLiteral("%"),
-                     m_echoMixSlider, m_echoMixVal, page));
+                     m_echoMixSlider, m_echoMixVal, page, &rl));
+        m_rowLabels.append(rl); m_valLabels.append(m_echoMixVal);
         l->addStretch();
 
         connect(m_echoDelaySlider, &QSlider::valueChanged, this, [this](int v) {
@@ -253,6 +268,7 @@ void AudioEffectWidget::buildUI()
         auto* l = new QVBoxLayout(page);
         l->setSpacing(6);
         l->setContentsMargins(4, 6, 4, 6);
+        QLabel* rl = nullptr;
 
         // 类型切换行
         {
@@ -264,6 +280,7 @@ void AudioEffectWidget::buildUI()
             row->addWidget(m_filterTypeBtn);
 
             auto* typeLabel = new QLabel(QStringLiteral("LowPass"), page);
+            m_filterTypeLabel = typeLabel;
             typeLabel->setStyleSheet("color: #888; font-size: 10px; background: transparent;");
             row->addWidget(typeLabel);
             row->addStretch();
@@ -288,9 +305,11 @@ void AudioEffectWidget::buildUI()
         }
 
         l->addWidget(makeSliderRow(QStringLiteral("频率"), 50, 15000, 1000, QStringLiteral("Hz"),
-                     m_filterCutoffSlider, m_filterCutoffVal, page));
+                     m_filterCutoffSlider, m_filterCutoffVal, page, &rl));
+        m_rowLabels.append(rl); m_valLabels.append(m_filterCutoffVal);
         l->addWidget(makeSliderRow(QStringLiteral("共振"), 0, 95, 0, QStringLiteral("%"),
-                     m_filterResonanceSlider, m_filterResonanceVal, page));
+                     m_filterResonanceSlider, m_filterResonanceVal, page, &rl));
+        m_rowLabels.append(rl); m_valLabels.append(m_filterResonanceVal);
         l->addStretch();
 
         connect(m_filterCutoffSlider, &QSlider::valueChanged, this, [this](int v) {
@@ -313,11 +332,14 @@ void AudioEffectWidget::buildUI()
         auto* l = new QVBoxLayout(page);
         l->setSpacing(8);
         l->setContentsMargins(4, 10, 4, 6);
+        QLabel* rl = nullptr;
 
         l->addWidget(makeSliderRow(QStringLiteral("半音"), -12, 12, 0, QStringLiteral(""),
-                     m_pitchSlider, m_pitchVal, page));
+                     m_pitchSlider, m_pitchVal, page, &rl));
+        m_rowLabels.append(rl); m_valLabels.append(m_pitchVal);
 
         auto* hint = new QLabel(QStringLiteral("范围: -12 ~ +12 半音"), page);
+        m_pitchHintLabel = hint;
         hint->setStyleSheet("color: #555; font-size: 10px; background: transparent;");
         hint->setAlignment(Qt::AlignCenter);
         l->addWidget(hint);
@@ -417,4 +439,121 @@ void AudioEffectWidget::syncAllParams()
     m_processor->setFilterCutoffHz(static_cast<float>(m_filterCutoffSlider->value()));
     m_processor->setFilterResonance(m_filterResonanceSlider->value() / 100.0f);
     m_processor->setPitchSemitones(m_pitchSlider->value());
+}
+
+// ─────────────────────────────────────────────
+//  主题换色
+// ─────────────────────────────────────────────
+
+void AudioEffectWidget::restyle(const ThemePalette& p)
+{
+    // 全局面板 QSS
+    QString panelQss = QStringLiteral(
+        "AudioEffectWidget { background: transparent; border: none; }"
+        "QLabel { background: transparent; color: %1; }"
+        "QSlider::groove:horizontal {"
+        "  height: 4px; background: %2; border-radius: 2px;"
+        "}"
+        "QSlider::handle:horizontal {"
+        "  background: %3; width: 12px; height: 12px;"
+        "  margin: -5px 0; border-radius: 6px;"
+        "}"
+        "QSlider::handle:horizontal:hover { background: %4; }"
+        "QSlider::sub-page:horizontal { background: %5; border-radius: 2px; }"
+    ).arg(p.text, p.bg, p.primary, p.primary, p.primaryDark);
+    setStyleSheet(panelQss);
+
+    // 背景面板
+    if (m_bgPanel) {
+        QColor pc(p.primary);
+        m_bgPanel->setStyleSheet(QStringLiteral(
+            "#effectBgPanel {"
+            "  background: rgba(40, 44, 70, 220);"
+            "  border: 1px solid rgba(%1, %2, %3, 0.3);"
+            "  border-radius: 8px;"
+            "}"
+        ).arg(pc.red()).arg(pc.green()).arg(pc.blue()));
+    }
+
+    // 标题
+    if (m_titleLabel)
+        m_titleLabel->setStyleSheet(QStringLiteral(
+            "color: %1; font-size: 14px; font-weight: bold; background: transparent;"
+        ).arg(p.primary));
+
+    // Tab 按钮
+    QString tabQss = QStringLiteral(
+        "QPushButton {"
+        "  color: %1; font-size: 12px; font-weight: bold;"
+        "  background: %2; border: none; border-radius: 4px;"
+        "  padding: 6px 0;"
+        "}"
+        "QPushButton:hover { color: %3; background: %4; }"
+        "QPushButton:checked {"
+        "  color: %5; background: rgba(%6, %7, %8, 40);"
+        "  border: 1px solid %9;"
+        "}"
+    ).arg(p.dimText, p.surface, p.text, p.surfaceHover,
+          p.primary,
+          QString::number(QColor(p.primary).red()),
+          QString::number(QColor(p.primary).green()),
+          QString::number(QColor(p.primary).blue()),
+          p.primaryDark);
+
+    for (auto* btn : m_tabGroup->buttons())
+        btn->setStyleSheet(tabQss);
+
+    // 数值标签（绿色）
+    for (auto* lb : m_valLabels)
+        lb->setStyleSheet(QStringLiteral(
+            "color: %1; font-size: 11px; font-weight: bold; background: transparent;"
+        ).arg(p.primary));
+
+    // 行标签（暗色）
+    for (auto* lb : m_rowLabels)
+        lb->setStyleSheet(QStringLiteral(
+            "color: %1; font-size: 11px; background: transparent;"
+        ).arg(p.dimText));
+
+    // 提示标签
+    if (m_hintLabel)
+        m_hintLabel->setStyleSheet(QStringLiteral(
+            "color: %1; font-size: 11px; background: transparent;"
+        ).arg(p.dimText));
+    if (m_pitchHintLabel)
+        m_pitchHintLabel->setStyleSheet(QStringLiteral(
+            "color: %1; font-size: 10px; background: transparent;"
+        ).arg(p.dimText));
+    if (m_filterTypeLabel)
+        m_filterTypeLabel->setStyleSheet(QStringLiteral(
+            "color: %1; font-size: 10px; background: transparent;"
+        ).arg(p.dimText));
+
+    // 滤波类型切换按钮
+    if (m_filterTypeBtn)
+        m_filterTypeBtn->setStyleSheet(QStringLiteral(
+            "QPushButton {"
+            "  color: %1; font-size: 11px; font-weight: bold;"
+            "  background: transparent; border: 1px solid %1; border-radius: 3px;"
+            "  padding: 3px 10px;"
+            "}"
+            "QPushButton:hover { background: %1; color: %2; }"
+        ).arg(p.secondary, p.bg));
+
+    // 重置按钮
+    QString resetQss = QStringLiteral(
+        "QPushButton {"
+        "  color: %1; font-size: 11px;"
+        "  background: transparent; border: 1px solid %1; border-radius: 3px;"
+        "  padding: 4px 16px;"
+        "}"
+        "QPushButton:hover { background: %1; color: %2; }"
+    ).arg(p.secondary, p.text);
+    if (m_bgPanel) {
+        auto btns = m_bgPanel->findChildren<QPushButton*>();
+        for (auto* b : btns) {
+            if (b->text().contains(QStringLiteral("重置")))
+                b->setStyleSheet(resetQss);
+        }
+    }
 }

@@ -20,8 +20,9 @@ class GameWidget;
 class ResultWidget;
 class LeaderboardWidget;
 class ChartEditorWidget;
+class ThemeEditorWidget;
 
-/// 主窗口：QStackedWidget 容器，管理 7 个页面的导航
+/// 主窗口：QStackedWidget 容器，管理 8 个页面的导航
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -58,8 +59,11 @@ private slots:
     /// 用编辑后的音符开始游戏
     void onChartPlayRequested(const QVector<GameNote>& notes);
 
+    /// 打开主题编辑器
+    void onThemeEditRequested();
+
 private:
-    /// 导航到指定页面（0=主菜单, 1=歌曲选择, 2=可视化, 3=游戏, 4=结算, 5=排行榜, 6=谱面编辑）
+    /// 导航到指定页面（0=主菜单, 1=歌曲选择, 2=可视化, 3=游戏, 4=结算, 5=排行榜, 6=谱面编辑, 7=主题编辑）
     void navigateTo(int pageIndex);
 
     /// 构建 UI
@@ -92,6 +96,7 @@ private:
     ResultWidget* m_resultPage;          ///< 结算页
     LeaderboardWidget* m_leaderboardPage; ///< 排行榜页
     ChartEditorWidget* m_chartEditorPage; ///< 谱面编辑页
+    ThemeEditorWidget* m_themeEditorPage; ///< 主题编辑页
 
     QString m_currentSongPath;           ///< 当前选中的歌曲路径
     QVector<GameNote> m_currentNotes;    ///< 当前歌曲的原始音符（6键，不被4K重映射修改）
@@ -102,12 +107,18 @@ private:
     QFutureWatcher<void>* m_loadWatcher; ///< 异步加载监听器
     bool m_loadSuccess;                  ///< 加载是否成功
     float m_analyzedBpm;                 ///< 异步分析出的 BPM
+    float m_pendingLowFreqRatio;         ///< 后台线程计算的低频能量比
+    float m_pendingAvgEnergy;            ///< 后台线程计算的平均能量
     QString m_errorMessage;              ///< 后台线程写入的错误信息
 
     // 分析超时
     QTimer* m_analysisTimer;             ///< 90s 超时定时器
     bool m_analysisActive;               ///< 分析是否正在进行
     int m_gameLaneCount;                 ///< 当前游戏键数（4 或 6）
+    bool m_survivalMode = false;         ///< 当前游戏是否为生存模式
+
+private slots:
+    void onSurvivalGameOver();           ///< 生存模式血量归零处理
 
     // ── 跨线程信号（供后台分析 lambda 通过 QueuedConnection 安全更新 UI）──
 signals:
